@@ -10,9 +10,10 @@ part 'notice_state.dart';
 class NoticeBloc extends Bloc<NoticeEvent, NoticeState> {
   NoticeBloc(NoticeRepository repository)
       : _repository = repository,
-        super(NoticeState(notices: repository.notices)) {
+        super(const NoticeState(isLoading: true)) {
+    on<NoticeStarted>(_onLoad);
     on<NoticeTabChanged>(_onTabChanged);
-    on<NoticeRefreshRequested>(_onRefreshRequested);
+    on<NoticeRefreshRequested>(_onLoad);
   }
 
   final NoticeRepository _repository;
@@ -21,7 +22,13 @@ class NoticeBloc extends Bloc<NoticeEvent, NoticeState> {
     emit(state.copyWith(tab: event.tab));
   }
 
-  void _onRefreshRequested(NoticeRefreshRequested event, Emitter<NoticeState> emit) {
-    emit(state.copyWith(notices: _repository.notices));
+  Future<void> _onLoad(NoticeEvent event, Emitter<NoticeState> emit) async {
+    emit(state.copyWith(isLoading: true));
+    try {
+      final notices = await _repository.fetchNotices();
+      emit(state.copyWith(notices: notices, isLoading: false));
+    } catch (_) {
+      emit(state.copyWith(isLoading: false));
+    }
   }
 }

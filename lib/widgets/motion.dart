@@ -15,12 +15,14 @@ class Pressable extends StatefulWidget {
   final VoidCallback? onTap;
   final double pressedScale;
   final bool haptics;
+  final String? semanticLabel;
   const Pressable({
     super.key,
     required this.child,
     this.onTap,
     this.pressedScale = 0.97,
     this.haptics = true,
+    this.semanticLabel,
   });
 
   @override
@@ -37,22 +39,26 @@ class _PressableState extends State<Pressable> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapDown: (_) => _set(true),
-      onTapUp: (_) => _set(false),
-      onTapCancel: () => _set(false),
-      onTap: widget.onTap == null
-          ? null
-          : () {
-              if (widget.haptics) HapticFeedback.selectionClick();
-              widget.onTap!();
-            },
-      child: AnimatedScale(
-        scale: _down ? widget.pressedScale : 1.0,
-        duration: const Duration(milliseconds: 110),
-        curve: Curves.easeOut,
-        child: widget.child,
+    return Semantics(
+      button: true,
+      label: widget.semanticLabel,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (_) => _set(true),
+        onTapUp: (_) => _set(false),
+        onTapCancel: () => _set(false),
+        onTap: widget.onTap == null
+            ? null
+            : () {
+                if (widget.haptics) HapticFeedback.selectionClick();
+                widget.onTap!();
+              },
+        child: AnimatedScale(
+          scale: _down ? widget.pressedScale : 1.0,
+          duration: const Duration(milliseconds: 110),
+          curve: Curves.easeOut,
+          child: widget.child,
+        ),
       ),
     );
   }
@@ -74,9 +80,6 @@ class Entrance extends StatefulWidget {
     this.duration = const Duration(milliseconds: 420),
     this.offsetY = 18,
   });
-
-  /// Whether this widget can be used as a const child.
-  static bool get canConst => false;
 
   @override
   State<Entrance> createState() => _EntranceState();

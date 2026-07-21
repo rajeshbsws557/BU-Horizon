@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../bloc/people_bloc.dart';
 import '../di/di.dart';
@@ -33,25 +34,13 @@ class _PeopleSearchView extends StatefulWidget {
 
 class _PeopleSearchViewState extends State<_PeopleSearchView> {
   Timer? _debounce;
-  Timer? _loadingTimer;
-  bool _loading = true;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadInitialResults();
-  }
-
-  Future<void> _loadInitialResults() async {
-    _loadingTimer?.cancel();
-    final completer = Completer<void>();
-    _loadingTimer = Timer(const Duration(milliseconds: 450), () {
-      if (mounted) {
-        setState(() => _loading = false);
-      }
-      if (!completer.isCompleted) completer.complete();
-    });
-    return completer.future;
+  Future<void> _mailTo(String email) async {
+    final uri = Uri(scheme: 'mailto', path: email);
+    final ok = await launchUrl(uri);
+    if (!ok && mounted) {
+      showToast(context, 'Could not open mail app for $email');
+    }
   }
 
   void _onSearchChanged(String value) {
@@ -66,14 +55,13 @@ class _PeopleSearchViewState extends State<_PeopleSearchView> {
   @override
   void dispose() {
     _debounce?.cancel();
-    _loadingTimer?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final avatarColors = [
-      AppColors.primary,
+      context.colors.primary,
       context.colors.accentCyan,
       context.colors.purple,
       context.colors.warning,
@@ -95,7 +83,7 @@ class _PeopleSearchViewState extends State<_PeopleSearchView> {
             child: BlocBuilder<PeopleBloc, PeopleState>(
               builder: (context, state) {
                 final visible = state.people;
-                return _loading
+                return state.isLoading
                     ? const _PeopleSkeletonList()
                     : visible.isEmpty
                         ? const EmptyState(
@@ -115,7 +103,7 @@ class _PeopleSearchViewState extends State<_PeopleSearchView> {
                                 child: _PersonCard(
                                   person: p,
                                   color: avatarColors[i % avatarColors.length],
-                                  onMail: () => showToast(context, 'Opening mail to ${p.email}'),
+                                  onMail: () => _mailTo(p.email),
                                 ),
                               );
                             },
@@ -178,57 +166,66 @@ class _PersonCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      label: '${person.name}, ${person.department}, ${person.email}',
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: context.colors.surfaceAlt,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: context.colors.border),
-        ),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 22,
-              backgroundColor: color.withValues(alpha: 0.18),
-              child: Text(
-                person.initials,
-                style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 14),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: context.colors.surfaceAlt,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: context.colors.border),
+      ),
+      child: Row(
+        children: [
+          // Exclude only the informational part so the mail button below
+          // stays reachable by screen readers.
+          Expanded(
+            child: Semantics(
+              label: '${person.name}, ${person.department}, ${person.email}',
+              excludeSemantics: true,
+              child: Row(
                 children: [
-                  Text(
-                    person.name,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14.5,
-                      color: context.colors.textPrimary,
+                  CircleAvatar(
+                    radius: 22,
+                    backgroundColor: color.withValues(alpha: 0.18),
+                    child: Text(
+                      person.initials,
+                      style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 14),
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    person.department,
-                    style: TextStyle(color: context.colors.textSecondary, fontSize: 12),
-                  ),
-                  Text(
-                    person.email,
-                    style: TextStyle(color: context.colors.textMuted, fontSize: 11.5),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          person.name,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14.5,
+                            color: context.colors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          person.department,
+                          style: TextStyle(color: context.colors.textSecondary, fontSize: 12),
+                        ),
+                        Text(
+                          person.email,
+                          style: TextStyle(color: context.colors.textMuted, fontSize: 11.5),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
-            IconButton(
-              onPressed: onMail,
-              tooltip: 'Email ${person.name}',
-              icon: const Icon(Icons.mail_outline_rounded, color: AppColors.primary, size: 20),
-            ),
-          ],
-        ),
+          ),
+          IconButton(
+            onPressed: onMail,
+            tooltip: 'Email ${person.name}',
+            icon: Icon(Icons.mail_outline_rounded, color: context.colors.primary, size: 20),
+          ),
+        ],
       ),
     );
   }

@@ -2,13 +2,20 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../data/sample_data.dart';
+import '../di/di.dart';
 import '../navigation/app_router.dart';
+import '../supabase/auth_service.dart';
+import '../supabase/reference_data_service.dart';
+import '../supabase/session_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/horizon_logo.dart';
-import '../widgets/motion.dart';
 
+/// Registration collects the identity information required by the database
+/// (poll Q20): name, roll, Student ID, university email (@bu.ac.bd), phone,
+/// session (2025-26 format), faculty and department. Faculty/department come
+/// from live reference data; the batch is resolved from department + session
+/// before sign-up so the profile lands in the right batch.
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
 
@@ -17,234 +24,425 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
+  final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _idController = TextEditingController();
+  final _rollController = TextEditingController();
+  final _studentIdController = TextEditingController();
   final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _sessionController = TextEditingController();
   final _passwordController = TextEditingController();
+
+  final _auth = getIt<AuthService>();
+  final _refData = getIt<ReferenceDataService>();
+
   bool _obscurePassword = true;
+  bool _submitting = false;
+
+  // Reference data for the dropdowns.
+  List<FacultyOption> _faculties = [];
+  List<DepartmentOption> _departments = [];
+  String? _facultyId;
+  String? _departmentId;
+  bool _loadingRefs = true;
+  String? _refError;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadReferenceData();
+  }
 
   @override
   void dispose() {
     _nameController.dispose();
-    _idController.dispose();
+    _rollController.dispose();
+    _studentIdController.dispose();
     _emailController.dispose();
+    _phoneController.dispose();
+    _sessionController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
-  void _register() {
-    final name = _nameController.text.trim();
-    final id = _idController.text.trim();
-    final email = _emailController.text.trim();
-    final password = _passwordController.text.trim();
+  Future<void> _loadReferenceData() async {
+    setState(() {
+      _loadingRefs = true;
+      _refError = null;
+    });
+    try {
+      final faculties = await _refData.faculties();
+      final departments = await _refData.departments();
+      if (!mounted) return;
+      if (faculties.isEmpty || departments.isEmpty) {
+        // The form is unusable without the dropdowns; treat as a load failure.
+        setState(() {
+          _loadingRefs = false;
+          _refError = 'empty';
+        });
+        return;
+      }
+      setState(() {
+        _faculties = faculties;
+        _departments = departments;
+        _loadingRefs = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingRefs = false;
+        _refError = e.toString();
+      });
+    }
+  }
 
-    if (name.isEmpty || id.isEmpty || email.isEmpty || password.isEmpty) {
-      showToast(context, 'Please fill in all fields');
+  List<DepartmentOption> get _departmentsForFaculty => _facultyId == null
+      ? const []
+      : _departments.where((d) => d.facultyId == _facultyId).toList();
+
+  Future<void> _register() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (_facultyId == null || _departmentId == null) {
+      showToast(context, 'Please select your faculty and department');
       return;
     }
 
-    // Set logged in state to true
-    SampleData.isLoggedIn.value = true;
-    showToast(context, 'Account created successfully!');
-    context.go(AppRoutes.home);
+    setState(() => _submitting = true);
+    final session = _sessionController.text.trim();
+    final departmentId = _departmentId!;
+
+    try {
+      // Resolve the batch for this department + session so the profile lands in
+      // the correct batch. A missing batch is not fatal — the account is still
+      // created and an admin/CR can assign the batch later.
+      final batchId = await _refData.resolveBatchId(
+        departmentId: departmentId,
+        session: session,
+      );
+
+      final response = await _auth.signUp(
+        fullName: _nameController.text.trim(),
+        email: _emailController.text.trim().toLowerCase(),
+        password: _passwordController.text,
+        studentId: _studentIdController.text.trim(),
+        roll: _rollController.text.trim(),
+        phone: _phoneController.text.trim(),
+        facultyId: _facultyId,
+        departmentId: departmentId,
+        batchId: batchId,
+      );
+      if (!mounted) return;
+
+      // With email confirmation enabled there is no active session yet.
+      if (response.session == null) {
+        showToast(context,
+            'Account created. Check your email to confirm, then sign in.');
+        context.go(AppRoutes.login);
+      } else {
+        await getIt<SessionController>().refresh();
+        if (!mounted) return;
+        showToast(context, 'Account created successfully!');
+        context.go(AppRoutes.home);
+      }
+    } on AuthFailure catch (e) {
+      if (mounted) showToast(context, e.message);
+    } catch (e) {
+      if (mounted) showToast(context, 'Registration failed. $e');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(''),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-      ),
-      body: SafeArea(
+      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0),
+      body: SafeArea(child: _buildBody(context)),
+    );
+  }
+
+  Widget _buildBody(BuildContext context) {
+    if (_loadingRefs) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    // Reference data is required for the Faculty/Department dropdowns — show a
+    // clear retry state instead of a form that cannot be completed.
+    if (_refError != null) {
+      return Center(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+          padding: const EdgeInsets.all(32),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              const Center(child: HorizonLogo(size: 80)),
-              const SizedBox(height: 24),
-              Text(
-                'Create Account',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: context.colors.textPrimary),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Join the BU Horizon campus network.',
-                style: TextStyle(fontSize: 14, color: context.colors.textSecondary),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                'Full Name',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.colors.textSecondary),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _nameController,
-                style: TextStyle(color: context.colors.textPrimary),
-                decoration: InputDecoration(
-                  hintText: 'e.g., Rajesh Biswas',
-                  hintStyle: TextStyle(color: context.colors.textMuted),
-                  filled: true,
-                  fillColor: context.colors.surfaceAlt,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: context.colors.border),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: context.colors.border),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
-                  ),
+              Container(
+                width: 76,
+                height: 76,
+                decoration: BoxDecoration(
+                  color: context.colors.danger.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
                 ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Student ID',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.colors.textSecondary),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _idController,
-                style: TextStyle(color: context.colors.textPrimary),
-                decoration: InputDecoration(
-                  hintText: 'e.g., CSE-2021-047',
-                  hintStyle: TextStyle(color: context.colors.textMuted),
-                  filled: true,
-                  fillColor: context.colors.surfaceAlt,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: context.colors.border),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: context.colors.border),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Campus Email',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.colors.textSecondary),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _emailController,
-                keyboardType: TextInputType.emailAddress,
-                style: TextStyle(color: context.colors.textPrimary),
-                decoration: InputDecoration(
-                  hintText: 'e.g., student@bu.edu.bd',
-                  hintStyle: TextStyle(color: context.colors.textMuted),
-                  filled: true,
-                  fillColor: context.colors.surfaceAlt,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: context.colors.border),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: context.colors.border),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Password',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.colors.textSecondary),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _passwordController,
-                obscureText: _obscurePassword,
-                style: TextStyle(color: context.colors.textPrimary),
-                decoration: InputDecoration(
-                  hintText: 'Min. 6 characters',
-                  hintStyle: TextStyle(color: context.colors.textMuted),
-                  filled: true,
-                  fillColor: context.colors.surfaceAlt,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                      color: context.colors.textSecondary,
-                    ),
-                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: context.colors.border),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: context.colors.border),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 28),
-              Pressable(
-                onTap: _register,
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  alignment: Alignment.center,
-                  child: const Text(
-                    'Sign Up',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white),
-                  ),
-                ),
+                child: Icon(Icons.wifi_off_rounded,
+                    color: context.colors.danger, size: 34),
               ),
               const SizedBox(height: 18),
-              Center(
-                child: TextButton(
-                  onPressed: () => context.pop(),
-                  child: RichText(
-                    text: TextSpan(
-                      text: 'Already have an account? ',
-                      style: TextStyle(color: context.colors.textSecondary, fontSize: 14),
-                      children: const [
-                        TextSpan(
-                          text: 'Sign In',
-                          style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w700),
-                        ),
-                      ],
-                    ),
-                  ),
+              Text(
+                'Could not load faculties & departments',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                  color: context.colors.textPrimary,
                 ),
               ),
-              const SizedBox(height: 20),
-              Center(
-                child: Text(
-                  'Developer: Rajesh Biswas (rajeshbiswas.dev)',
-                  style: TextStyle(color: context.colors.textMuted, fontSize: 11, fontStyle: FontStyle.italic),
+              const SizedBox(height: 8),
+              Text(
+                'Registration needs the university\'s faculty and department '
+                'list. Check your internet connection and try again.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: context.colors.textSecondary,
+                  fontSize: 13,
+                  height: 1.45,
                 ),
+              ),
+              const SizedBox(height: 24),
+              PrimaryButton(
+                label: 'Try Again',
+                icon: Icons.refresh_rounded,
+                onPressed: _loadReferenceData,
               ),
             ],
           ),
         ),
+      );
+    }
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Center(child: HorizonLogo(size: 80)),
+            const SizedBox(height: 24),
+            Text('Create Account',
+                style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w800,
+                    color: context.colors.textPrimary)),
+            const SizedBox(height: 8),
+            Text('Join the BU Horizon campus network.',
+                style: TextStyle(fontSize: 14, color: context.colors.textSecondary)),
+            const SizedBox(height: 24),
+            ..._buildFields(context),
+            const SizedBox(height: 28),
+            PrimaryButton(
+              label: _submitting ? 'Creating account...' : 'Sign Up',
+              icon: Icons.person_add_alt_1_rounded,
+              onPressed: _submitting ? () {} : _register,
+            ),
+            const SizedBox(height: 18),
+            Center(
+              child: TextButton(
+                onPressed: () => context.pop(),
+                child: RichText(
+                  text: TextSpan(
+                    text: 'Already have an account? ',
+                    style: TextStyle(color: context.colors.textSecondary, fontSize: 14),
+                    children: [
+                      TextSpan(
+                        text: 'Sign In',
+                        style: TextStyle(
+                            color: context.colors.primary, fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Center(
+              child: Text('Developer: Rajesh Biswas (rajeshbiswas.dev)',
+                  style: TextStyle(
+                      color: context.colors.textMuted,
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic)),
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  InputDecoration _dec(BuildContext context, String hint, {Widget? suffix}) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: TextStyle(color: context.colors.textMuted),
+      filled: true,
+      fillColor: context.colors.surfaceAlt,
+      suffixIcon: suffix,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: context.colors.border),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: context.colors.border),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: context.colors.primary, width: 1.5),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: context.colors.danger),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: context.colors.danger, width: 1.5),
+      ),
+    );
+  }
+
+  Widget _label(BuildContext context, String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 8, top: 16),
+        child: Text(text,
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: context.colors.textSecondary)),
+      );
+
+  List<Widget> _buildFields(BuildContext context) {
+    final textStyle = TextStyle(color: context.colors.textPrimary);
+    return [
+      _label(context, 'Full Name'),
+      TextFormField(
+        controller: _nameController,
+        textInputAction: TextInputAction.next,
+        style: textStyle,
+        decoration: _dec(context, 'e.g., Rajesh Biswas'),
+        validator: (v) =>
+            (v == null || v.trim().isEmpty) ? 'Enter your full name' : null,
+      ),
+      _label(context, 'Student ID'),
+      TextFormField(
+        controller: _studentIdController,
+        textInputAction: TextInputAction.next,
+        style: textStyle,
+        decoration: _dec(context, 'From your Student ID card'),
+        validator: (v) =>
+            (v == null || v.trim().isEmpty) ? 'Enter your Student ID' : null,
+      ),
+      _label(context, 'Class Roll'),
+      TextFormField(
+        controller: _rollController,
+        textInputAction: TextInputAction.next,
+        style: textStyle,
+        decoration: _dec(context, 'e.g., 047'),
+        validator: (v) =>
+            (v == null || v.trim().isEmpty) ? 'Enter your class roll' : null,
+      ),
+      _label(context, 'University Email'),
+      TextFormField(
+        controller: _emailController,
+        keyboardType: TextInputType.emailAddress,
+        textInputAction: TextInputAction.next,
+        style: textStyle,
+        decoration: _dec(context, 'name@bu.ac.bd'),
+        validator: (v) {
+          final value = (v ?? '').trim().toLowerCase();
+          if (value.isEmpty) return 'Enter your university email';
+          // Must be the university domain (poll Q20).
+          final re = RegExp(r'^[^@\s]+@bu\.ac\.bd$');
+          if (!re.hasMatch(value)) return 'Use your @bu.ac.bd university email';
+          return null;
+        },
+      ),
+      _label(context, 'Phone Number'),
+      TextFormField(
+        controller: _phoneController,
+        keyboardType: TextInputType.phone,
+        textInputAction: TextInputAction.next,
+        style: textStyle,
+        decoration: _dec(context, 'e.g., 01712-345678'),
+        validator: (v) =>
+            (v == null || v.trim().isEmpty) ? 'Enter your phone number' : null,
+      ),
+      _label(context, 'Session'),
+      TextFormField(
+        controller: _sessionController,
+        textInputAction: TextInputAction.next,
+        keyboardType: TextInputType.datetime,
+        style: textStyle,
+        decoration: _dec(context, 'e.g., 2025-26'),
+        validator: (v) {
+          final value = (v ?? '').trim();
+          if (value.isEmpty) return 'Enter your session';
+          // Session format like 2025-26 (poll Q4/Q20).
+          if (!RegExp(r'^\d{4}-\d{2}$').hasMatch(value)) {
+            return 'Use the format 2025-26';
+          }
+          return null;
+        },
+      ),
+      _label(context, 'Faculty'),
+      DropdownButtonFormField<String>(
+        initialValue: _facultyId,
+        isExpanded: true,
+        style: textStyle,
+        dropdownColor: context.colors.surface,
+        decoration: _dec(context, 'Select your faculty'),
+        items: _faculties
+            .map((f) => DropdownMenuItem(value: f.id, child: Text(f.name)))
+            .toList(),
+        onChanged: (value) => setState(() {
+          _facultyId = value;
+          _departmentId = null; // reset dependent dropdown
+        }),
+        validator: (v) => v == null ? 'Select your faculty' : null,
+      ),
+      _label(context, 'Department'),
+      DropdownButtonFormField<String>(
+        initialValue: _departmentId,
+        isExpanded: true,
+        style: textStyle,
+        dropdownColor: context.colors.surface,
+        decoration: _dec(
+          context,
+          _facultyId == null ? 'Select a faculty first' : 'Select your department',
+        ),
+        items: _departmentsForFaculty
+            .map((d) => DropdownMenuItem(value: d.id, child: Text(d.name)))
+            .toList(),
+        onChanged: _facultyId == null
+            ? null
+            : (value) => setState(() => _departmentId = value),
+        validator: (v) => v == null ? 'Select your department' : null,
+      ),
+      _label(context, 'Password'),
+      TextFormField(
+        controller: _passwordController,
+        obscureText: _obscurePassword,
+        textInputAction: TextInputAction.done,
+        style: textStyle,
+        decoration: _dec(
+          context,
+          'Min. 6 characters',
+          suffix: IconButton(
+            icon: Icon(
+              _obscurePassword
+                  ? Icons.visibility_off_outlined
+                  : Icons.visibility_outlined,
+              color: context.colors.textSecondary,
+            ),
+            onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+          ),
+        ),
+        validator: (v) =>
+            (v == null || v.length < 6) ? 'Password must be at least 6 characters' : null,
+      ),
+    ];
   }
 }

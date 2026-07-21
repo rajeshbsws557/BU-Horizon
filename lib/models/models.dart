@@ -10,6 +10,8 @@ enum AttendanceStatus { present, absent, upcoming }
 
 enum AlertType { bus, notice, exam, event, library, lostFound }
 
+enum ResourceKind { file, image, link }
+
 enum BloodGroup {
   aPositive('A+'),
   aNegative('A-'),
@@ -58,6 +60,10 @@ class ClassNotice with _$ClassNotice {
     required NoticeCategory category,
     required IconData icon,
     required Color color,
+    @Default('') String id,
+    @Default('') String offeringId,
+    @Default('') String body,
+    @Default(false) bool isPinned,
   }) = _ClassNotice;
 }
 
@@ -96,6 +102,13 @@ class BloodRequest with _$BloodRequest {
     required BloodGroup group,
     required String location,
     required String time,
+    @Default('') String id,
+    @Default(1) int units,
+    @Default('') String contact,
+    @Default('') String note,
+    @Default(false) bool isUrgent,
+    @Default(false) bool isMine,
+    @Default(false) bool responded,
   }) = _BloodRequest;
 }
 
@@ -108,7 +121,22 @@ class LostFoundItem with _$LostFoundItem {
     required String time,
     required bool isLost,
     required IconData icon,
+    @Default('') String id,
+    @Default(false) bool isMine,
+    @Default(false) bool responded,
   }) = _LostFoundItem;
+}
+
+/// A recorded in-app response to a blood request or lost & found item.
+@freezed
+class ResponseItem with _$ResponseItem {
+  const factory ResponseItem({
+    required String id,
+    @Default('') String responderName,
+    @Default('') String message,
+    @Default('') String contact,
+    @Default('') String time,
+  }) = _ResponseItem;
 }
 
 @freezed
@@ -118,6 +146,53 @@ class AttendanceClass with _$AttendanceClass {
     required String time,
     required AttendanceStatus status,
   }) = _AttendanceClass;
+}
+
+/// Per-course attendance totals for the signed-in student.
+@freezed
+class CourseAttendance with _$CourseAttendance {
+  const factory CourseAttendance({
+    required String courseCode,
+    required String courseTitle,
+    required int present,
+    required int total,
+  }) = _CourseAttendance;
+
+  const CourseAttendance._();
+
+  double get percentage => total == 0 ? 0 : present / total;
+}
+
+@freezed
+class ExamItem with _$ExamItem {
+  const factory ExamItem({
+    required String id,
+    required String title,
+    required String typeLabel,
+    required String dateLabel,
+    required String timeLabel,
+    @Default('') String courseCode,
+    @Default('') String room,
+    @Default('') String description,
+  }) = _ExamItem;
+}
+
+@freezed
+class ResourceItem with _$ResourceItem {
+  const factory ResourceItem({
+    required String id,
+    required String title,
+    required ResourceKind kind,
+    @Default('') String offeringId,
+    @Default('') String description,
+    @Default('') String courseCode,
+    @Default('') String url,
+    @Default('') String storagePath,
+    @Default('') String fileName,
+    @Default('') String mimeType,
+    @Default(0) int sizeBytes,
+    @Default('') String dateLabel,
+  }) = _ResourceItem;
 }
 
 @freezed

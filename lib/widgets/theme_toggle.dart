@@ -28,45 +28,51 @@ class ThemeToggleIcon extends StatelessWidget {
                 HapticFeedback.selectionClick();
                 context.read<ThemeCubit>().toggleTheme();
               },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeOutCubic,
-                width: size,
-                height: size,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isLight
-                      ? AppColors.primary.withValues(alpha: 0.12)
-                      : context.colors.surfaceAlt,
-                  border: Border.all(
-                    color: isLight
-                        ? AppColors.primary.withValues(alpha: 0.3)
-                        : context.colors.border,
-                  ),
-                ),
+              child: ConstrainedBox(
+                // Keep the visual at [size] but guarantee a >=44dp tap target.
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                 child: Center(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 350),
-                    transitionBuilder: (child, animation) {
-                      return RotationTransition(
-                        turns: Tween<double>(begin: 0.75, end: 1.0).animate(
-                          CurvedAnimation(
-                            parent: animation,
-                            curve: Curves.easeOutBack,
-                          ),
-                        ),
-                        child: FadeTransition(opacity: animation, child: child),
-                      );
-                    },
-                    child: Icon(
-                      isLight
-                          ? Icons.light_mode_rounded
-                          : Icons.dark_mode_rounded,
-                      key: ValueKey<bool>(isLight),
-                      size: size * 0.52,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOutCubic,
+                    width: size,
+                    height: size,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
                       color: isLight
-                          ? AppColors.primary
-                          : context.colors.gold,
+                          ? context.colors.primary.withValues(alpha: 0.12)
+                          : context.colors.surfaceAlt,
+                      border: Border.all(
+                        color: isLight
+                            ? context.colors.primary.withValues(alpha: 0.3)
+                            : context.colors.border,
+                      ),
+                    ),
+                    child: Center(
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 350),
+                        transitionBuilder: (child, animation) {
+                          return RotationTransition(
+                            turns: Tween<double>(begin: 0.75, end: 1.0).animate(
+                              CurvedAnimation(
+                                parent: animation,
+                                curve: Curves.easeOutBack,
+                              ),
+                            ),
+                            child: FadeTransition(opacity: animation, child: child),
+                          );
+                        },
+                        child: Icon(
+                          isLight
+                              ? Icons.light_mode_rounded
+                              : Icons.dark_mode_rounded,
+                          key: ValueKey<bool>(isLight),
+                          size: size * 0.52,
+                          color: isLight
+                              ? context.colors.primary
+                              : context.colors.gold,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -113,14 +119,14 @@ class ThemeToggleRow extends StatelessWidget {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: isLight
-                            ? AppColors.primary.withValues(alpha: 0.15)
-                            : AppColors.gold.withValues(alpha: 0.15),
+                            ? context.colors.primary.withValues(alpha: 0.15)
+                            : context.colors.gold.withValues(alpha: 0.15),
                       ),
                       child: Icon(
                         isLight
                             ? Icons.light_mode_rounded
                             : Icons.dark_mode_rounded,
-                        color: isLight ? AppColors.primary : AppColors.gold,
+                        color: isLight ? context.colors.primary : context.colors.gold,
                         size: 20,
                       ),
                     ),
@@ -140,8 +146,8 @@ class ThemeToggleRow extends StatelessWidget {
                           const SizedBox(height: 2),
                           Text(
                             isLight
-                                ? 'Light Mode (Logo Vibe)'
-                                : 'Dark Mode (Deep Navy)',
+                                ? 'Light Mode'
+                                : 'Dark Mode',
                             style: TextStyle(
                               fontSize: 12,
                               color: context.colors.textSecondary,
@@ -152,7 +158,7 @@ class ThemeToggleRow extends StatelessWidget {
                     ),
                     Switch.adaptive(
                       value: isLight,
-                      activeThumbColor: AppColors.primary,
+                      activeThumbColor: context.colors.primary,
                       onChanged: (val) {
                         HapticFeedback.selectionClick();
                         context.read<ThemeCubit>().toggleTheme();

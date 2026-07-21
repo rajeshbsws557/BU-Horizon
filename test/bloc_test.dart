@@ -82,23 +82,26 @@ void main() {
 
     setUp(() {
       repo = MockNoticeRepository();
-      when(() => repo.notices).thenReturn([
-        const ClassNotice(
-          title: 'Exam Notice',
-          subtitle: 'Midterm exam routine published',
-          time: 'Yesterday',
-          category: NoticeCategory.academic,
-          icon: Icons.edit_document,
-          color: Colors.orange,
-        ),
-      ]);
+      when(() => repo.fetchNotices()).thenAnswer((_) async => [
+            const ClassNotice(
+              title: 'Exam Notice',
+              subtitle: 'Midterm exam routine published',
+              time: 'Yesterday',
+              category: NoticeCategory.academic,
+              icon: Icons.edit_document,
+              color: Colors.orange,
+            ),
+          ]);
       bloc = NoticeBloc(repo);
     });
 
     tearDown(() => bloc.close());
 
-    test('initial state loads notices from repository', () {
-      expect(bloc.state.notices.length, 1);
+    test('started event loads notices from repository', () async {
+      bloc.add(const NoticeStarted());
+      await expectState<NoticeState>(
+          bloc, (s) => !s.isLoading && s.notices.length == 1);
+      verify(() => repo.fetchNotices()).called(1);
     });
 
     test('tab change updates tab index', () async {
@@ -113,9 +116,12 @@ void main() {
 
     setUp(() {
       repo = MockPeopleRepository();
-      when(() => repo.search(any())).thenReturn([
-        const Person(name: 'Nusrat Jahan', department: 'CSE Department', email: 'nusrat@bu.edu.bd'),
-      ]);
+      when(() => repo.search(any())).thenAnswer((_) async => [
+            const Person(
+                name: 'Nusrat Jahan',
+                department: 'CSE Department',
+                email: 'nusrat@bu.edu.bd'),
+          ]);
       bloc = PeopleBloc(repo);
     });
 
@@ -123,13 +129,15 @@ void main() {
 
     test('search updates query and people', () async {
       bloc.add(const PeopleSearched('nusrat'));
-      await expectState<PeopleState>(bloc, (s) => s.query == 'nusrat' && s.people.length == 1);
+      await expectState<PeopleState>(bloc,
+          (s) => !s.isLoading && s.query == 'nusrat' && s.people.length == 1);
       verify(() => repo.search('nusrat')).called(1);
     });
 
     test('empty query returns repository results', () async {
       bloc.add(const PeopleSearched(''));
-      await expectState<PeopleState>(bloc, (s) => s.query.isEmpty && s.people.length == 1);
+      await expectState<PeopleState>(
+          bloc, (s) => !s.isLoading && s.query.isEmpty && s.people.length == 1);
       verify(() => repo.search('')).called(1);
     });
   });
@@ -140,26 +148,31 @@ void main() {
 
     setUp(() {
       repo = MockBloodRepository();
-      when(() => repo.urgentNeed).thenReturn(
-        const BloodNeed(
-          units: 3,
-          group: BloodGroup.bPositive,
-          contact: '01712-345678',
-          location: 'Shaheed Suhrawardy Medical',
-          time: '2 hrs ago',
-        ),
-      );
-      when(() => repo.requests).thenReturn([
-        const BloodRequest(group: BloodGroup.oNegative, location: 'Ibrahim Medical', time: '3 hrs ago'),
-      ]);
+      when(() => repo.fetchRequests()).thenAnswer((_) async => [
+            const BloodRequest(
+              group: BloodGroup.bPositive,
+              location: 'Shaheed Suhrawardy Medical',
+              time: '2 hrs ago',
+              units: 3,
+              contact: '01712-345678',
+              isUrgent: true,
+            ),
+            const BloodRequest(
+                group: BloodGroup.oNegative,
+                location: 'Ibrahim Medical',
+                time: '3 hrs ago'),
+          ]);
       bloc = BloodBloc(repo);
     });
 
     tearDown(() => bloc.close());
 
-    test('initial state loads urgent need and requests', () {
-      expect(bloc.state.urgentNeed.group, BloodGroup.bPositive);
-      expect(bloc.state.requests.length, 1);
+    test('started event loads requests and derives the urgent need', () async {
+      bloc.add(const BloodStarted());
+      await expectState<BloodState>(
+          bloc, (s) => !s.isLoading && s.requests.length == 2);
+      expect(bloc.state.urgentNeed?.group, BloodGroup.bPositive);
+      verify(() => repo.fetchRequests()).called(1);
     });
 
     test('tab change updates tab index', () async {

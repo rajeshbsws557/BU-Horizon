@@ -1,14 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'bloc/theme_cubit.dart';
 import 'di/di.dart';
 import 'navigation/app_router.dart';
+import 'supabase/supabase_config.dart';
 import 'theme/app_theme.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // The live project's credentials are baked in as defaults, so this runs for
+  // every normal build. Blanking both values via --dart-define keeps the
+  // UI-only design mode (sample data, no auth).
+  if (SupabaseConfig.hasCredentials) {
+    await Supabase.initialize(
+      url: SupabaseConfig.url,
+      // The publishable (formerly "anon") key is safe to ship in a client;
+      // RLS is what protects the data.
+      publishableKey: SupabaseConfig.anonKey,
+    );
+    SupabaseConfig.markInitialized();
+  }
+
   configureDependencies();
   runApp(const BUHorizonApp());
 }

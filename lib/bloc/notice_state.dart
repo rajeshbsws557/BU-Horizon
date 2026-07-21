@@ -2,12 +2,17 @@ part of 'notice_bloc.dart';
 
 class NoticeState extends Equatable {
   final int tab;
+  final bool isLoading;
   final List<ClassNotice> notices;
 
-  const NoticeState({this.tab = 0, this.notices = const []});
+  const NoticeState({this.tab = 0, this.isLoading = false, this.notices = const []});
 
-  NoticeState copyWith({int? tab, List<ClassNotice>? notices}) =>
-      NoticeState(tab: tab ?? this.tab, notices: notices ?? this.notices);
+  NoticeState copyWith({int? tab, bool? isLoading, List<ClassNotice>? notices}) =>
+      NoticeState(
+        tab: tab ?? this.tab,
+        isLoading: isLoading ?? this.isLoading,
+        notices: notices ?? this.notices,
+      );
 
   List<ClassNotice> get visibleNotices {
     switch (tab) {
@@ -23,5 +28,5 @@ class NoticeState extends Equatable {
   }
 
   @override
-  List<Object?> get props => [tab, notices];
+  List<Object?> get props => [tab, isLoading, notices];
 }

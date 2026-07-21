@@ -5,12 +5,8 @@ import '../navigation/app_router.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_bottom_nav.dart';
 import '../widgets/horizon_logo.dart';
+import '../widgets/login_gate.dart';
 import '../widgets/theme_toggle.dart';
-import 'about_screen.dart';
-import 'alerts_screen.dart';
-import 'home_screen.dart';
-import 'people_search_screen.dart';
-import 'profile_screen.dart';
 
 /// App-wide navigation coordinator backed by [go_router].
 ///
@@ -21,14 +17,6 @@ class MainScaffold extends StatelessWidget {
 
   const MainScaffold({super.key, required this.navigationShell});
 
-  static const List<Widget> _pages = [
-    HomeScreen(),
-    PeopleSearchScreen(),
-    AlertsScreen(),
-    AboutScreen(),
-    ProfileScreen(),
-  ];
-
   void _onNavTap(BuildContext context, int raw) {
     if (raw == 2) {
       _openHub(context);
@@ -36,6 +24,8 @@ class MainScaffold extends StatelessWidget {
     }
     // Raw bottom-nav slots: 0 Home, 1 Search, 2 Hub, 3 Alerts, 4 Profile.
     // Shell branches: 0 Home, 1 Search, 2 Alerts, 3 About, 4 Profile.
+    // Only People Search is members-only among the bottom-nav destinations.
+    if (raw == 1 && !requireSignIn(context, 'People Search')) return;
     final branch = raw == 0
         ? 0
         : raw == 1
@@ -43,39 +33,41 @@ class MainScaffold extends StatelessWidget {
             : raw == 3
                 ? 2
                 : 4;
-    navigationShell.goBranch(branch);
+    navigationShell.goBranch(
+      branch,
+      initialLocation: branch == navigationShell.currentIndex,
+    );
   }
 
   void _openHub(BuildContext context) {
     showModalBottomSheet(
       context: context,
       backgroundColor: context.colors.surface,
+      // Let the sheet grow to its content height (and scroll on small screens)
+      // instead of being clamped to ~56% of the screen, which clipped the grid.
+      isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: 640),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
       builder: (ctx) => _HubSheet(
         onSelect: (dest) {
           Navigator.pop(ctx);
-          switch (dest) {
-            case 'bus':
-              context.push(AppRoutes.bus);
-              break;
-            case 'notices':
-              context.push(AppRoutes.notices);
-              break;
-            case 'blood':
-              context.push(AppRoutes.blood);
-              break;
-            case 'lost':
-              context.push(AppRoutes.lostFound);
-              break;
-            case 'attendance':
-              context.push(AppRoutes.attendance);
-              break;
-            case 'about':
-              context.push(AppRoutes.about);
-              break;
-          }
+          // (route, gate label) per hub tile; label == null means guest-open.
+          // Members-only tiles mirror AppRoutes.membersOnly: notices,
+          // attendance, exams and resources need an account.
+          final (route, gateLabel) = switch (dest) {
+            'bus' => (AppRoutes.bus, null),
+            'notices' => (AppRoutes.notices, 'Class Notices'),
+            'blood' => (AppRoutes.blood, null),
+            'lost' => (AppRoutes.lostFound, null),
+            'attendance' => (AppRoutes.attendance, 'Attendance'),
+            'exams' => (AppRoutes.exams, 'Exam Schedule'),
+            'resources' => (AppRoutes.resources, 'Resources'),
+            _ => (AppRoutes.about, null),
+          };
+          if (gateLabel != null && !requireSignIn(context, gateLabel)) return;
+          context.push(route);
         },
       ),
     );
@@ -102,10 +94,7 @@ class MainScaffold extends StatelessWidget {
                   constraints: BoxConstraints(
                     maxWidth: isWide ? 1320 : double.infinity,
                   ),
-                  child: IndexedStack(
-                    index: navigationShell.currentIndex,
-                    children: _pages,
-                  ),
+                  child: navigationShell,
                 ),
               ),
             ),
@@ -155,15 +144,15 @@ class MainScaffold extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.12),
+                color: context.colors.primary.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: const Text(
+              child: Text(
                 'University of Barishal Portal',
                 style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.primary,
+                  color: context.colors.primary,
                 ),
               ),
             ),
@@ -187,7 +176,11 @@ class MainScaffold extends StatelessWidget {
               label: 'People Search',
               icon: Icons.search_rounded,
               isSelected: navigationShell.currentIndex == 1,
-              onTap: () => navigationShell.goBranch(1),
+              onTap: () {
+                if (requireSignIn(context, 'People Search')) {
+                  navigationShell.goBranch(1);
+                }
+              },
             ),
             _webNavButton(
               context: context,
@@ -218,7 +211,7 @@ class MainScaffold extends StatelessWidget {
               icon: const Icon(Icons.apps_rounded, size: 18),
               label: const Text('Quick Hub'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: context.colors.primary,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 shape: RoundedRectangleBorder(
@@ -246,19 +239,23 @@ class MainScaffold extends StatelessWidget {
         icon: Icon(
           icon,
           size: 18,
-          color: isSelected ? AppColors.primary : context.colors.textSecondary,
+          color: isSelected
+              ? context.colors.primary
+              : context.colors.textSecondary,
         ),
         label: Text(
           label,
           style: TextStyle(
             fontSize: 13.5,
             fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
-            color: isSelected ? AppColors.primary : context.colors.textPrimary,
+            color: isSelected
+                ? context.colors.primary
+                : context.colors.textPrimary,
           ),
         ),
         style: TextButton.styleFrom(
           backgroundColor: isSelected
-              ? AppColors.primary.withValues(alpha: 0.12)
+              ? context.colors.primary.withValues(alpha: 0.12)
               : Colors.transparent,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           shape: RoundedRectangleBorder(
@@ -293,12 +290,14 @@ class _HubSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = <List<dynamic>>[
-      ['bus', Icons.directions_bus_rounded, 'Bus Schedule', AppColors.primary],
-      ['notices', Icons.campaign_rounded, 'Class Notices', AppColors.accentCyan],
-      ['blood', Icons.water_drop_rounded, 'Blood Help', AppColors.danger],
-      ['lost', Icons.inventory_2_rounded, 'Lost & Found', AppColors.warning],
-      ['attendance', Icons.check_circle_rounded, 'Attendance', AppColors.success],
-      ['about', Icons.info_rounded, 'About', AppColors.purple],
+      ['bus', Icons.directions_bus_rounded, 'Bus Schedule', context.colors.primary],
+      ['notices', Icons.campaign_rounded, 'Class Notices', context.colors.accentCyan],
+      ['exams', Icons.edit_calendar_rounded, 'Exam Schedule', context.colors.danger],
+      ['resources', Icons.folder_rounded, 'Resources', context.colors.primary],
+      ['attendance', Icons.check_circle_rounded, 'Attendance', context.colors.success],
+      ['blood', Icons.water_drop_rounded, 'Blood Help', context.colors.danger],
+      ['lost', Icons.inventory_2_rounded, 'Lost & Found', context.colors.warning],
+      ['about', Icons.info_rounded, 'About', context.colors.purple],
     ];
     return SafeArea(
       child: Padding(
@@ -329,14 +328,18 @@ class _HubSheet extends StatelessWidget {
             const SizedBox(height: 12),
             const ThemeToggleRow(),
             const SizedBox(height: 16),
-            GridView.count(
-              crossAxisCount: 3,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              mainAxisSpacing: 14,
-              crossAxisSpacing: 14,
-              childAspectRatio: 0.95,
-              children: items.map((it) {
+            // Cap the grid to the room actually available (minus the handle,
+            // title and theme row above) and let it scroll if it can't fit —
+            // this is what stops the "bottom overflowed" banner on short
+            // screens and in landscape.
+            Flexible(
+              child: GridView.count(
+                crossAxisCount: 3,
+                shrinkWrap: true,
+                mainAxisSpacing: 14,
+                crossAxisSpacing: 14,
+                childAspectRatio: 0.95,
+                children: items.map((it) {
                 return GestureDetector(
                   onTap: () => onSelect(it[0] as String),
                   child: Column(
@@ -363,7 +366,8 @@ class _HubSheet extends StatelessWidget {
                     ],
                   ),
                 );
-              }).toList(),
+                }).toList(),
+              ),
             ),
           ],
         ),

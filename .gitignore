@@ -47,3 +47,53 @@ app.*.map.json
 # Excluded directories
 Bus Schedule/
 .github/
+
+# Local secrets & sensitive credentials — never commit
+Supabase Db Password.txt
+.mcp.json
+dart_defines.json
+Screenshot 2026-07-21 020453.jpg
+Supabase Login crediantials.jpg
+.env
+.env.local
+.env.*.local
+**/.env
+**/.env.local
+**/.env.*.local
+!**/.env.example
+
+# AI & Agent configurations / local storage
+.agents/
+.claude/
+.gemini/
+brain/
+
+# Supabase CLI local temp state & cache
+supabase/.temp/
+**/.temp/
+supabase/.branches/
+
+# Android & iOS Signing Keys, Keystores, and Local Properties
+key.properties
+**/key.properties
+*.jks
+*.keystore
+local.properties
+**/local.properties
+GoogleService-Info.plist
+google-services.json
+*.key
+*.pem
+*.p12
+*.pfx
+*.pkcs12
+
+# Wildcard patterns for any accidental credentials or passwords
+*password*.txt
+*password*.jpg
+*password*.png
+*credential*.txt
+*credential*.jpg
+*credential*.png
+*secret*.txt
+*secret*.json

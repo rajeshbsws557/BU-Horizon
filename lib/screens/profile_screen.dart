@@ -2,8 +2,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../data/sample_data.dart';
+import '../di/di.dart';
 import '../navigation/app_router.dart';
+import '../supabase/session_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/horizon_logo.dart';
@@ -15,14 +16,15 @@ class ProfileScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final session = getIt<SessionController>();
     return SafeArea(
-      child: ValueListenableBuilder<bool>(
-        valueListenable: SampleData.isLoggedIn,
-        builder: (context, isLoggedIn, child) {
-          if (!isLoggedIn) {
+      child: ListenableBuilder(
+        listenable: session,
+        builder: (context, child) {
+          if (!session.isSignedIn) {
             return const _LoggedOutView();
           }
-          return const _LoggedInView();
+          return _LoggedInView(profile: session.profile);
         },
       ),
     );
@@ -30,10 +32,18 @@ class ProfileScreen extends StatelessWidget {
 }
 
 class _LoggedInView extends StatelessWidget {
-  const _LoggedInView();
+  final CurrentProfile? profile;
+  const _LoggedInView({this.profile});
 
   @override
   Widget build(BuildContext context) {
+    final name = profile?.fullName.isNotEmpty == true ? profile!.fullName : 'Student';
+    final initials = profile?.initials ?? '?';
+    final idAndEmail = [
+      if (profile?.studentId != null && profile!.studentId!.isNotEmpty)
+        profile!.studentId,
+      if (profile?.email.isNotEmpty == true) profile!.email,
+    ].join('  ·  ');
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       children: [
@@ -50,10 +60,10 @@ class _LoggedInView extends StatelessWidget {
                 height: 96,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient: AppColors.blueGradient,
+                  gradient: context.colors.blueGradient,
                   boxShadow: [
                     BoxShadow(
-                      color: AppColors.primary.withValues(alpha: 0.35),
+                      color: context.colors.primary.withValues(alpha: 0.35),
                       blurRadius: 20,
                       offset: const Offset(0, 8),
                     ),
@@ -61,13 +71,7 @@ class _LoggedInView extends StatelessWidget {
                 ),
                 child: Center(
                   child: Text(
-                    SampleData.studentName
-                        .trim()
-                        .split(RegExp(r'\s+'))
-                        .map((w) => w[0])
-                        .take(2)
-                        .join()
-                        .toUpperCase(),
+                    initials,
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 32,
@@ -83,7 +87,7 @@ class _LoggedInView extends StatelessWidget {
                   width: 28,
                   height: 28,
                   decoration: BoxDecoration(
-                    color: AppColors.success,
+                    color: context.colors.success,
                     shape: BoxShape.circle,
                     border: Border.all(color: context.colors.background, width: 3),
                   ),
@@ -95,7 +99,7 @@ class _LoggedInView extends StatelessWidget {
         const SizedBox(height: 14),
         Center(
           child: Text(
-            SampleData.studentName,
+            name,
             style: TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.w700,
@@ -106,7 +110,7 @@ class _LoggedInView extends StatelessWidget {
         const SizedBox(height: 4),
         Center(
           child: Text(
-            '${SampleData.studentId}  ·  ${SampleData.studentEmail}',
+            idAndEmail,
             style: TextStyle(color: context.colors.textMuted, fontSize: 12),
           ),
         ),
@@ -142,9 +146,12 @@ class _LoggedInView extends StatelessWidget {
           icon: Icons.logout_rounded,
           label: 'Logout',
           danger: true,
-          onTap: () {
-            SampleData.isLoggedIn.value = false;
-            showToast(context, 'Logged out');
+          onTap: () async {
+            await getIt<SessionController>().signOut();
+            if (context.mounted) {
+              showToast(context, 'Logged out');
+              context.go(AppRoutes.login);
+            }
           },
         ),
         const SizedBox(height: 20),
@@ -168,76 +175,85 @@ class _LoggedOutView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const HorizonLogo(size: 96),
-          const SizedBox(height: 24),
-          Text(
-            'BU Horizon',
-            style: TextStyle(
-              fontSize: 26,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1,
-              color: context.colors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Your Campus Companion',
-            style: TextStyle(fontSize: 14, color: context.colors.textSecondary),
-          ),
-          const SizedBox(height: 24),
-          const ThemeToggleRow(),
-          const SizedBox(height: 16),
-          GlassCard(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-            child: Column(
-              children: [
-                Text(
-                  'Join your campus network to sync your course schedules, track classes and bus notifications, check attendance history, and build your student profile.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 13.5,
-                    color: context.colors.textSecondary,
-                    height: 1.5,
-                  ),
-                ),
-                const SizedBox(height: 28),
-                PrimaryButton(
-                  label: 'Sign In',
-                  onPressed: () => context.push(AppRoutes.login),
-                ),
-                const SizedBox(height: 14),
-                TextButton(
-                  onPressed: () => context.push(AppRoutes.register),
-                  child: const Text(
-                    'Create an Account',
+    return LayoutBuilder(builder: (context, constraints) {
+      return SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: IntrinsicHeight(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const HorizonLogo(size: 96),
+                  const SizedBox(height: 24),
+                  Text(
+                    'BU Horizon',
                     style: TextStyle(
-                      color: AppColors.primary,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1,
+                      color: context.colors.textPrimary,
                     ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 6),
+                  Text(
+                    'Your Campus Companion',
+                    style: TextStyle(fontSize: 14, color: context.colors.textSecondary),
+                  ),
+                  const SizedBox(height: 24),
+                  const ThemeToggleRow(),
+                  const SizedBox(height: 16),
+                  GlassCard(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                    child: Column(
+                      children: [
+                        Text(
+                          'Join your campus network to sync your course schedules, track classes and bus notifications, check attendance history, and build your student profile.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            color: context.colors.textSecondary,
+                            height: 1.5,
+                          ),
+                        ),
+                        const SizedBox(height: 28),
+                        PrimaryButton(
+                          label: 'Sign In',
+                          onPressed: () => context.push(AppRoutes.login),
+                        ),
+                        const SizedBox(height: 14),
+                        TextButton(
+                          onPressed: () => context.push(AppRoutes.register),
+                          child: Text(
+                            'Create an Account',
+                            style: TextStyle(
+                              color: context.colors.primary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Expanded(child: SizedBox(height: 24)),
+                  Text(
+                    'Developer: Rajesh Biswas (rajeshbiswas.dev)',
+                    style: TextStyle(
+                      color: context.colors.textMuted,
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+              ),
             ),
           ),
-          const Spacer(),
-          Text(
-            'Developer: Rajesh Biswas (rajeshbiswas.dev)',
-            style: TextStyle(
-              color: context.colors.textMuted,
-              fontSize: 11,
-              fontStyle: FontStyle.italic,
-            ),
-          ),
-          const SizedBox(height: 10),
-        ],
-      ),
-    );
+        ),
+      );
+    });
   }
 }
 
@@ -255,7 +271,7 @@ class _Tile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = danger ? AppColors.danger : context.colors.textPrimary;
+    final color = danger ? context.colors.danger : context.colors.textPrimary;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
@@ -274,7 +290,7 @@ class _Tile extends StatelessWidget {
               children: [
                 Icon(
                   icon,
-                  color: danger ? AppColors.danger : context.colors.textSecondary,
+                  color: danger ? context.colors.danger : context.colors.textSecondary,
                   size: 20,
                 ),
                 const SizedBox(width: 14),

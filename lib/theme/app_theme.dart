@@ -214,64 +214,53 @@ class AppThemeColors extends ThemeExtension<AppThemeColors> {
   );
 }
 
+/// Const sentinel colors used as *semantic tokens* inside const data models
+/// (which have no BuildContext). Never render these directly — resolve them
+/// against the live theme with [AppThemeColorsResolve.resolve].
+class AppColorToken {
+  AppColorToken._();
+  static const Color primary = Color(0xFF2E7DF6);
+  static const Color accentCyan = Color(0xFF4FC3F7);
+  static const Color success = Color(0xFF22C55E);
+  static const Color danger = Color(0xFFE23744);
+  static const Color warning = Color(0xFFF5A623);
+  static const Color gold = Color(0xFFFFC107);
+  static const Color purple = Color(0xFF9B6DFF);
+}
+
+extension AppThemeColorsResolve on AppThemeColors {
+  /// Maps an [AppColorToken] sentinel stored in const data to the live theme
+  /// color. Unknown colors pass through unchanged.
+  Color resolve(Color token) {
+    if (token == AppColorToken.primary) return primary;
+    if (token == AppColorToken.accentCyan) return accentCyan;
+    if (token == AppColorToken.success) return success;
+    if (token == AppColorToken.danger) return danger;
+    if (token == AppColorToken.warning) return warning;
+    if (token == AppColorToken.gold) return gold;
+    if (token == AppColorToken.purple) return purple;
+    return token;
+  }
+}
+
 extension AppThemeColorsContext on BuildContext {
   AppThemeColors get colors =>
       Theme.of(this).extension<AppThemeColors>() ?? AppThemeColors.dark;
   bool get isLight => Theme.of(this).brightness == Brightness.light;
 }
 
-/// Central palette + theme for BU Horizon.
-/// Keeps static constants for backwards compatibility and const constructors,
-/// plus `of(context)` for dynamic theme switching.
+/// Accessor for the active theme's colors. All rendering must go through
+/// `AppColors.of(context)` / `context.colors` so light and dark modes stay
+/// in sync — the old static dark-palette constants have been removed.
 class AppColors {
   AppColors._();
 
   static AppThemeColors of(BuildContext context) => context.colors;
-
-  static const Color background = Color(0xFF05070E);
-  static const Color surface = Color(0xFF0E1524);
-  static const Color surfaceAlt = Color(0xFF141C2E);
-  static const Color cardSolid = Color(0xFF131B2C);
-
-  static const Color primary = Color(0xFF2E7DF6);
-  static const Color primaryDark = Color(0xFF1E63D6);
-  static const Color primarySoft = Color(0xFF1B2C4E);
-  static const Color accentCyan = Color(0xFF4FC3F7);
-
-  static const Color success = Color(0xFF22C55E);
-  static const Color danger = Color(0xFFE23744);
-  static const Color warning = Color(0xFFF5A623);
-  static const Color gold = Color(0xFFFFC107);
-  static const Color purple = Color(0xFF9B6DFF);
-
-  static const Color textPrimary = Color(0xFFF3F6FF);
-  static const Color textSecondary = Color(0xFF9AA6BF);
-  static const Color textMuted = Color(0xFF7E8CA8);
-
-  static const Color border = Color(0xFF20293D);
-
-  static const LinearGradient blueGradient = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFF2E7DF6), Color(0xFF1E63D6)],
-  );
-
-  static const LinearGradient bloodGradient = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFFE23744), Color(0xFF9E1C27)],
-  );
-
-  static const LinearGradient heroGradient = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFF17233D), Color(0xFF0C1526)],
-  );
 }
 
-/// Single source of truth for the standard card look, now context-aware.
-BoxDecoration cardDecoration({Color? color, double? radius, BuildContext? context}) {
-  final c = context?.colors ?? AppThemeColors.dark;
+/// Single source of truth for the standard card look, context-aware.
+BoxDecoration cardDecoration({Color? color, double? radius, required BuildContext context}) {
+  final c = context.colors;
   return BoxDecoration(
     color: color ?? c.surfaceAlt,
     borderRadius: BorderRadius.circular(radius ?? AppRadii.card),

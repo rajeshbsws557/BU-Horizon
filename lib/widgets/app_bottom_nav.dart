@@ -18,17 +18,15 @@ class AppBottomNav extends StatelessWidget {
       ),
       child: SafeArea(
         top: false,
-        child: SizedBox(
-          height: 66,
-          child: Row(
-            children: [
-              _item(context, 0, Icons.home_rounded, 'Home'),
-              _item(context, 1, Icons.search_rounded, 'Search'),
-              _centerButton(),
-              _item(context, 3, Icons.notifications_rounded, 'Alerts'),
-              _item(context, 4, Icons.person_rounded, 'Profile'),
-            ],
-          ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            _item(context, 0, Icons.home_rounded, 'Home'),
+            _item(context, 1, Icons.search_rounded, 'Search'),
+            _centerButton(),
+            _item(context, 3, Icons.notifications_rounded, 'Alerts'),
+            _item(context, 4, Icons.person_rounded, 'Profile'),
+          ],
         ),
       ),
     );
@@ -36,7 +34,10 @@ class AppBottomNav extends StatelessWidget {
 
   Widget _item(BuildContext context, int index, IconData icon, String label) {
     final active = index == currentIndex;
-    final color = active ? AppColors.primary : context.colors.textMuted;
+    final color = active ? context.colors.primary : context.colors.textMuted;
+    // Cap label scaling so the bar stays compact at large OS text sizes.
+    final clampedScale =
+        MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.3);
     return Expanded(
       child: Semantics(
         selected: active,
@@ -44,26 +45,35 @@ class AppBottomNav extends StatelessWidget {
         button: true,
         child: InkWell(
           onTap: () => onTap(index),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              AnimatedScale(
-                scale: active ? 1.15 : 1.0,
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutBack,
-                child: Icon(icon, color: color, size: 24),
-              ),
-              const SizedBox(height: 4),
-              AnimatedDefaultTextStyle(
-                duration: const Duration(milliseconds: 200),
-                style: TextStyle(
-                  color: color,
-                  fontSize: 11,
-                  fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const SizedBox(height: 9),
+                AnimatedScale(
+                  scale: active ? 1.15 : 1.0,
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutBack,
+                  child: Icon(icon, color: color, size: 24),
                 ),
-                child: Text(label),
-              ),
-            ],
+                const SizedBox(height: 4),
+                AnimatedDefaultTextStyle(
+                  duration: const Duration(milliseconds: 200),
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 11,
+                    fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+                  ),
+                  child: Text(
+                    label,
+                    textScaler: TextScaler.linear(clampedScale),
+                  ),
+                ),
+                const SizedBox(height: 9),
+              ],
+            ),
           ),
         ),
       ),
@@ -72,7 +82,11 @@ class AppBottomNav extends StatelessWidget {
 
   Widget _centerButton() {
     return Expanded(
+      // heightFactor: 1 makes Center hug the hub instead of expanding to the
+      // full height the bottomNavigationBar slot offers (which would blow the
+      // bar up to fill the whole screen).
       child: Center(
+        heightFactor: 1,
         child: Semantics(
           label: 'Quick access hub',
           button: true,
@@ -117,10 +131,11 @@ class _PulsingHubState extends State<_PulsingHub>
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: context.colors.surface,
-            border: Border.all(color: AppColors.primary, width: 2),
+            border: Border.all(color: context.colors.primary, width: 2),
             boxShadow: [
               BoxShadow(
-                color: AppColors.primary.withValues(alpha: 0.25 + 0.30 * t),
+                color: context.colors.primary
+                    .withValues(alpha: 0.25 + 0.30 * t),
                 blurRadius: 14 + 10 * t,
                 spreadRadius: 1 + t,
               ),

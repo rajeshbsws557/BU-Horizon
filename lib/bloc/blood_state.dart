@@ -2,22 +2,30 @@ part of 'blood_bloc.dart';
 
 class BloodState extends Equatable {
   final int tab;
-  final BloodNeed urgentNeed;
+  final bool isLoading;
   final List<BloodRequest> requests;
 
   const BloodState({
     this.tab = 0,
-    required this.urgentNeed,
+    this.isLoading = false,
     this.requests = const [],
   });
 
-  BloodState copyWith({int? tab, BloodNeed? urgentNeed, List<BloodRequest>? requests}) =>
+  /// The most recent urgent open request, shown as the hero card.
+  BloodRequest? get urgentNeed {
+    for (final r in requests) {
+      if (r.isUrgent) return r;
+    }
+    return null;
+  }
+
+  BloodState copyWith({int? tab, bool? isLoading, List<BloodRequest>? requests}) =>
       BloodState(
         tab: tab ?? this.tab,
-        urgentNeed: urgentNeed ?? this.urgentNeed,
+        isLoading: isLoading ?? this.isLoading,
         requests: requests ?? this.requests,
       );
 
   @override
-  List<Object?> get props => [tab, urgentNeed, requests];
+  List<Object?> get props => [tab, isLoading, requests];
 }

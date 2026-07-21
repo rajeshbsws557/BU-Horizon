@@ -7,51 +7,61 @@ import '../theme/app_theme.dart';
 class SampleData {
   SampleData._();
 
-  static final ValueNotifier<bool> isLoggedIn = ValueNotifier(false);
-
-  static const String studentName = 'Rajesh Biswas';
-  static const String studentId = 'CSE-2021-047';
-  static const String studentDept = 'CSE Department, 3rd Semester';
-  static const String studentEmail = 'rajeshbiswas@bu.edu.bd';
-
-
+  // NOTE: The `color` fields below store static AppColors constants as
+  // *semantic tokens* only (the models are const and there is no BuildContext
+  // here). Consumers must resolve them against the active theme at render
+  // time — see `_NoticeCard._resolveColor` in class_notices_screen.dart.
+  // `quickActions` is consumed by home_screen.dart, which renders the static
+  // values directly.
   static const List<QuickAction> quickActions = [
     QuickAction(
         title: 'Bus Schedule',
         subtitle: 'View bus timing & set alarm',
         icon: Icons.directions_bus_rounded,
-        color: AppColors.primary,
+        color: AppColorToken.primary,
         route: '/bus',),
     QuickAction(
         title: 'Class Notices',
         subtitle: 'Stay updated',
         icon: Icons.campaign_rounded,
-        color: AppColors.accentCyan,
+        color: AppColorToken.accentCyan,
         route: '/notices',),
     QuickAction(
         title: 'People Search',
         subtitle: 'Find anyone in campus',
         icon: Icons.group_rounded,
-        color: AppColors.purple,
+        color: AppColorToken.purple,
         route: '/people',),
     QuickAction(
         title: 'Blood Help',
         subtitle: 'Request or offer blood',
         icon: Icons.water_drop_rounded,
-        color: AppColors.danger,
+        color: AppColorToken.danger,
         route: '/blood',),
     QuickAction(
         title: 'Lost & Found',
         subtitle: 'Report or find items',
         icon: Icons.inventory_2_rounded,
-        color: AppColors.warning,
+        color: AppColorToken.warning,
         route: '/lost-found',),
     QuickAction(
         title: 'Attendance',
         subtitle: 'Mark & track attendance',
         icon: Icons.check_circle_rounded,
-        color: AppColors.success,
+        color: AppColorToken.success,
         route: '/attendance',),
+    QuickAction(
+        title: 'Exam Schedule',
+        subtitle: 'Quizzes, midterms & finals',
+        icon: Icons.edit_calendar_rounded,
+        color: AppColorToken.danger,
+        route: '/exams',),
+    QuickAction(
+        title: 'Resources',
+        subtitle: 'Notes, files & links',
+        icon: Icons.folder_rounded,
+        color: AppColorToken.primary,
+        route: '/resources',),
   ];
 
   static List<BusRoute> busRoutes() => [
@@ -63,13 +73,13 @@ class SampleData {
       ];
 
   static const List<ClassNotice> notices = [
-    ClassNotice(title: 'CSE Department', subtitle: 'Class canceled today at 2 PM', time: '10:30 AM', category: NoticeCategory.department, icon: Icons.notifications_active_rounded, color: AppColors.primary),
-    ClassNotice(title: 'Exam Notice', subtitle: 'Midterm exam routine published', time: 'Yesterday', category: NoticeCategory.academic, icon: Icons.edit_document, color: AppColors.warning),
-    ClassNotice(title: 'EEE Department', subtitle: 'Project submission deadline extended', time: 'Yesterday', category: NoticeCategory.department, icon: Icons.folder_copy_rounded, color: AppColors.accentCyan),
-    ClassNotice(title: 'Seminar', subtitle: 'AI in Modern World', time: '2 days ago', category: NoticeCategory.events, icon: Icons.mic_rounded, color: AppColors.danger),
-    ClassNotice(title: 'Library Notice', subtitle: 'Library will remain closed on Sunday', time: '3 days ago', category: NoticeCategory.academic, icon: Icons.local_library_rounded, color: AppColors.purple),
-    ClassNotice(title: 'Math Department', subtitle: 'Extra class on Calculus', time: '3 days ago', category: NoticeCategory.department, icon: Icons.functions_rounded, color: AppColors.primary),
-    ClassNotice(title: 'Workshop', subtitle: 'Web Development Workshop', time: '5 days ago', category: NoticeCategory.events, icon: Icons.build_rounded, color: AppColors.warning),
+    ClassNotice(title: 'CSE Department', subtitle: 'Class canceled today at 2 PM', time: '10:30 AM', category: NoticeCategory.department, icon: Icons.notifications_active_rounded, color: AppColorToken.primary),
+    ClassNotice(title: 'Exam Notice', subtitle: 'Midterm exam routine published', time: 'Yesterday', category: NoticeCategory.academic, icon: Icons.edit_document, color: AppColorToken.warning),
+    ClassNotice(title: 'EEE Department', subtitle: 'Project submission deadline extended', time: 'Yesterday', category: NoticeCategory.department, icon: Icons.folder_copy_rounded, color: AppColorToken.accentCyan),
+    ClassNotice(title: 'Seminar', subtitle: 'AI in Modern World', time: '2 days ago', category: NoticeCategory.events, icon: Icons.mic_rounded, color: AppColorToken.danger),
+    ClassNotice(title: 'Library Notice', subtitle: 'Library will remain closed on Sunday', time: '3 days ago', category: NoticeCategory.academic, icon: Icons.local_library_rounded, color: AppColorToken.purple),
+    ClassNotice(title: 'Math Department', subtitle: 'Extra class on Calculus', time: '3 days ago', category: NoticeCategory.department, icon: Icons.functions_rounded, color: AppColorToken.primary),
+    ClassNotice(title: 'Workshop', subtitle: 'Web Development Workshop', time: '5 days ago', category: NoticeCategory.events, icon: Icons.build_rounded, color: AppColorToken.warning),
   ];
 
   static const List<Person> people = [

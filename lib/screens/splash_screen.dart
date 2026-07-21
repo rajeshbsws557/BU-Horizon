@@ -53,7 +53,7 @@ class _SplashScreenState extends State<SplashScreen>
   void initState() {
     super.initState();
     _intro.forward();
-    _navTimer = Timer(const Duration(milliseconds: 3000), () {
+    _navTimer = Timer(const Duration(milliseconds: 1500), () {
       if (mounted) context.go(AppRoutes.home);
     });
   }
@@ -186,16 +186,6 @@ class _SplashScreenState extends State<SplashScreen>
                         ),
                       ],
                     ),
-                    const SizedBox(height: 18),
-                    SizedBox(
-                      width: 26,
-                      height: 26,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.4,
-                        valueColor: const AlwaysStoppedAnimation(AppColors.primary),
-                        backgroundColor: context.colors.surfaceAlt,
-                      ),
-                    ),
                     const SizedBox(height: 20),
                     Text(
                       'Developed by Rajesh Biswas (rajeshbiswas.dev)',
@@ -239,7 +229,7 @@ class _RingedLogo extends StatelessWidget {
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.primary.withValues(alpha: 0.35),
+                  color: context.colors.primary.withValues(alpha: 0.35),
                   blurRadius: 40,
                   spreadRadius: 4,
                 ),
@@ -257,9 +247,9 @@ class _RingedLogo extends StatelessWidget {
                 gradient: SweepGradient(
                   colors: [
                     Colors.transparent,
-                    AppColors.primary,
+                    context.colors.primary,
                     context.colors.accentCyan,
-                    AppColors.primary,
+                    context.colors.primary,
                     Colors.transparent,
                   ],
                   stops: const [0.0, 0.25, 0.5, 0.75, 1.0],

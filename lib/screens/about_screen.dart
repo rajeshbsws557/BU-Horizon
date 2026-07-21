@@ -70,7 +70,7 @@ class AboutScreen extends StatelessWidget {
           const SizedBox(height: 24),
           Center(
             child: Text(
-              '© 2024 BU Horizon. All rights reserved.',
+              '© ${DateTime.now().year} BU Horizon. All rights reserved.',
               style: TextStyle(color: context.colors.textMuted, fontSize: 11.5),
             ),
           ),

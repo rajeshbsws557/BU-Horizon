@@ -1,0 +1,42 @@
+# BU Horizon — Supabase local config
+# Docs: https://supabase.com/docs/guides/local-development/cli/config
+project_id = "bu-horizon"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]        # `private` schema is intentionally NOT exposed
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 17
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+# All users must use 2FA (poll Q61). Enable MFA enrollment/verification.
+[auth.mfa]
+max_enrolled_factors = 10
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
+# Account recovery via email OTP and phone OTP (poll Q23).
+[auth.email]
+enable_signup = true
+enable_confirmations = true
+[auth.sms]
+enable_signup = false
+enable_confirmations = true
+
+[storage]
+enabled = true
+# Course files and images use the private `course-resources` Supabase Storage
+# bucket provisioned by the database migrations. Object access is enforced by
+# batch/course-aware RLS policies; links continue to use `external_url`.

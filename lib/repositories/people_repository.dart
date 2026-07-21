@@ -5,13 +5,13 @@ import '../models/models.dart';
 
 /// Repository for people search.
 abstract interface class PeopleRepository {
-  List<Person> search(String query);
+  Future<List<Person>> search(String query);
 }
 
 @Injectable(as: PeopleRepository)
 final class SamplePeopleRepository implements PeopleRepository {
   @override
-  List<Person> search(String query) {
+  Future<List<Person>> search(String query) async {
     final q = query.trim().toLowerCase();
     if (q.isEmpty) return List.unmodifiable(SampleData.people);
     return List.unmodifiable(

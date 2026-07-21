@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -17,7 +15,7 @@ class AlertsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
-      create: (_) => AlertCubit(getIt<AlertRepository>()),
+      create: (_) => AlertCubit(),
       child: const _AlertsView(),
     );
   }
@@ -32,7 +30,7 @@ class _AlertsView extends StatefulWidget {
 
 class _AlertsViewState extends State<_AlertsView> {
   bool _loading = true;
-  Timer? _loadingTimer;
+  List<AlertItem> _alerts = const [];
 
   @override
   void initState() {
@@ -41,25 +39,21 @@ class _AlertsViewState extends State<_AlertsView> {
   }
 
   Future<void> _load() async {
-    _loadingTimer?.cancel();
-    final completer = Completer<void>();
     setState(() => _loading = true);
-    _loadingTimer = Timer(const Duration(milliseconds: 450), () {
-      if (mounted) {
-        setState(() => _loading = false);
-      }
-      if (!completer.isCompleted) completer.complete();
-    });
-    return completer.future;
+    try {
+      final alerts = await getIt<AlertRepository>().fetchAlerts();
+      if (!mounted) return;
+      setState(() {
+        _alerts = alerts;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
   }
 
   Future<void> _refresh() => _load();
-
-  @override
-  void dispose() {
-    _loadingTimer?.cancel();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -78,15 +72,22 @@ class _AlertsViewState extends State<_AlertsView> {
           Expanded(
             child: BlocBuilder<AlertCubit, int>(
               builder: (context, tab) {
-                final repository = context.read<AlertCubit>().repository;
                 final visible = switch (tab) {
-                  1 => repository.busAlerts(),
-                  2 => repository.noticeAlerts(),
-                  3 => repository.otherAlerts(),
-                  _ => repository.alerts,
+                  1 => _alerts.where((a) => a.type == AlertType.bus).toList(),
+                  2 => _alerts
+                      .where((a) =>
+                          a.type == AlertType.notice || a.type == AlertType.exam)
+                      .toList(),
+                  3 => _alerts
+                      .where((a) =>
+                          a.type == AlertType.event ||
+                          a.type == AlertType.library ||
+                          a.type == AlertType.lostFound)
+                      .toList(),
+                  _ => _alerts,
                 };
                 return RefreshIndicator(
-                  color: AppColors.primary,
+                  color: context.colors.primary,
                   backgroundColor: context.colors.surfaceAlt,
                   onRefresh: _refresh,
                   semanticsLabel: 'Refresh alerts',
@@ -158,13 +159,9 @@ class _AlertSkeletonList extends StatelessWidget {
 }
 
 class AlertCubit extends Cubit<int> {
-  AlertCubit(this.repository) : super(0);
-
-  final AlertRepository repository;
+  AlertCubit() : super(0);
 
   void setTab(int tab) => emit(tab);
-
-  void refresh() => emit(state);
 }
 
 class _AlertCard extends StatelessWidget {
@@ -176,7 +173,7 @@ class _AlertCard extends StatelessWidget {
       case AlertType.bus:
         return (Icons.directions_bus_rounded, context.colors.warning);
       case AlertType.notice:
-        return (Icons.campaign_rounded, AppColors.primary);
+        return (Icons.campaign_rounded, context.colors.primary);
       case AlertType.exam:
         return (Icons.edit_document, context.colors.accentCyan);
       case AlertType.event:
@@ -193,6 +190,7 @@ class _AlertCard extends StatelessWidget {
     final (icon, color) = _style(context, alert.type);
     return Semantics(
       label: '${alert.type.name} alert. ${alert.title}. ${alert.subtitle}. ${alert.time}',
+      excludeSemantics: true,
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(

@@ -1,12 +1,9 @@
 // Developer Branding Watermark: Rajesh Biswas (rajeshbiswas.dev) - BU Horizon
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../bloc/bus_bloc.dart';
 import '../data/university_bus_schedule_data.dart';
 import '../di/di.dart';
-import '../repositories/bus_repository.dart';
+import '../repositories/bus_schedule_repository.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/motion.dart';
@@ -16,11 +13,7 @@ class BusScheduleScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return BlocProvider(
-      create: (_) =>
-          BusBloc(getIt<BusRepository>())..add(const BusTabChanged(0)),
-      child: const _BusScheduleView(),
-    );
+    return const _BusScheduleView();
   }
 }
 
@@ -32,6 +25,11 @@ class _BusScheduleView extends StatefulWidget {
 }
 
 class _BusScheduleViewState extends State<_BusScheduleView> {
+  // Bundled timetable renders instantly; the live rows from Supabase replace
+  // it as soon as the fetch completes (and on pull-to-refresh).
+  List<UniversityBusCategory> _categories = UniversityBusScheduleData.categories;
+  bool _syncing = false;
+
   int _selectedCategoryIndex = 0; // 0: Student, 1: Teacher, 2: Staff
   int _selectedRouteIndex = 0;
   int _selectedDirectionIndex = 0; // 0: All, 1: Campus Outbound, 2: City Inbound
@@ -40,16 +38,6 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
   String _selectedPlaceFilter = 'All Places';
   String _selectedTimeFilter = 'All Times';
 
-  static const List<String> _availablePlaces = [
-    'All Places',
-    'বিশ্ববিদ্যালয়',
-    'বরিশাল ক্লাব',
-    'নতুন বাজার',
-    'নথুল্লাবাদ',
-    'চৌমাথা মোড়',
-    'ট্রাস্ট ভবন',
-  ];
-
   static const List<String> _availableTimeRanges = [
     'All Times',
     'Morning (Before 12 PM)',
@@ -57,8 +45,48 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
     'Evening (5 PM+)',
   ];
 
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _syncing = true);
+    try {
+      final categories = await getIt<BusScheduleRepository>().fetchCategories();
+      if (!mounted) return;
+      setState(() {
+        if (categories.isNotEmpty) {
+          _categories = categories;
+          _selectedCategoryIndex =
+              _selectedCategoryIndex.clamp(0, categories.length - 1);
+          _selectedRouteIndex = 0;
+        }
+        _syncing = false;
+      });
+    } catch (_) {
+      // Keep showing the bundled timetable (same printed schedule) offline.
+      if (!mounted) return;
+      setState(() => _syncing = false);
+    }
+  }
+
+  /// 'All Places' + every departure place present in the loaded timetable.
+  List<String> get _availablePlaces {
+    final places = <String>{};
+    for (final cat in _categories) {
+      for (final r in cat.routes) {
+        for (final sec in r.departureSections) {
+          places.add(sec.departurePlace);
+        }
+      }
+    }
+    return ['All Places', ...places];
+  }
+
   UniversityBusCategory get _currentCategory =>
-      UniversityBusScheduleData.categories[_selectedCategoryIndex];
+      _categories[_selectedCategoryIndex];
 
   UniversityBusRoute get _currentRoute {
     if (_selectedRouteIndex >= _currentCategory.routes.length) {
@@ -131,29 +159,41 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
             onPressed: () => _showSearchModal(context),
           ),
           IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Refresh live schedule',
+            onPressed: _syncing ? null : _load,
+          ),
+          IconButton(
             icon: const Icon(Icons.map_rounded),
             tooltip: 'Toggle Route Map',
             onPressed: () {
               setState(() => _showRouteTimeline = !_showRouteTimeline);
             },
           ),
-          const Padding(
-            padding: EdgeInsets.only(right: 8),
-            child: Icon(Icons.notifications_none_rounded),
-          ),
         ],
+        bottom: _syncing
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(2),
+                child: LinearProgressIndicator(
+                  minHeight: 2,
+                  backgroundColor: context.colors.primary.withValues(alpha: 0.12),
+                ),
+              )
+            : null,
       ),
       body: Column(
         children: [
           // 1. Category Switcher (Student / Teacher / Staff)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(
-                UniversityBusScheduleData.categories.length,
+          Center(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: List.generate(
+                _categories.length,
                 (index) {
-                  final cat = UniversityBusScheduleData.categories[index];
+                  final cat = _categories[index];
                   final isSelected = _selectedCategoryIndex == index;
                   return Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -164,6 +204,7 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
                     ),
                   );
                 },
+              ),
               ),
             ),
           ),
@@ -239,8 +280,8 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
             child: Row(
               children: [
-                const Icon(Icons.filter_alt_rounded,
-                    size: 16, color: AppColors.primary),
+                Icon(Icons.filter_alt_rounded,
+                    size: 16, color: context.colors.primary),
                 const SizedBox(width: 6),
                 _FilterChipDropdown(
                   icon: Icons.place_rounded,
@@ -262,17 +303,17 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
                 if (_isFilterActive) ...[
                   const SizedBox(width: 8),
                   ActionChip(
-                    label: const Text(
+                    label: Text(
                       'Clear Filter',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: AppColors.primary,
+                        color: context.colors.primary,
                       ),
                     ),
-                    avatar: const Icon(Icons.close_rounded,
-                        size: 14, color: AppColors.primary),
-                    backgroundColor: AppColors.primary.withValues(alpha: 0.12),
+                    avatar: Icon(Icons.close_rounded,
+                        size: 14, color: context.colors.primary),
+                    backgroundColor: context.colors.primary.withValues(alpha: 0.12),
                     side: BorderSide.none,
                     onPressed: () {
                       setState(() {
@@ -303,9 +344,14 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
 
           // 5. Main Scrollable Content (Live Spotlight Hero + Grouped Schedule / Filtered Results)
           Expanded(
-            child: _isFilterActive
-                ? _buildFilteredResultsView(isDark)
-                : _buildRegularScheduleView(route, isDark),
+            child: RefreshIndicator(
+              color: context.colors.primary,
+              backgroundColor: context.colors.surfaceAlt,
+              onRefresh: _load,
+              child: _isFilterActive
+                  ? _buildFilteredResultsView(isDark)
+                  : _buildRegularScheduleView(route, isDark),
+            ),
           ),
         ],
       ),
@@ -314,7 +360,7 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
 
   Widget _buildFilteredResultsView(bool isDark) {
     final results = <Map<String, String>>[];
-    for (final cat in UniversityBusScheduleData.categories) {
+    for (final cat in _categories) {
       for (final r in cat.routes) {
         for (final sec in r.departureSections) {
           for (final trip in sec.trips) {
@@ -340,6 +386,7 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 1100),
             child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: EdgeInsets.fromLTRB(
                   isWide ? 32 : 16, 14, isWide ? 32 : 16, 24),
               children: [
@@ -347,21 +394,21 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.12),
+                    color: context.colors.primary.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.filter_list_rounded,
-                          size: 18, color: AppColors.primary),
+                      Icon(Icons.filter_list_rounded,
+                          size: 18, color: context.colors.primary),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'Showing ${results.length} available buses matching your filter',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
-                            color: AppColors.primary,
+                            color: context.colors.primary,
                           ),
                         ),
                       ),
@@ -401,31 +448,31 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 14, vertical: 8),
                             decoration: BoxDecoration(
-                              color: AppColors.primary.withValues(alpha: 0.14),
+                              color: context.colors.primary.withValues(alpha: 0.14),
                               borderRadius: const BorderRadius.vertical(
                                   top: Radius.circular(15)),
                             ),
                             child: Row(
                               children: [
-                                const Icon(Icons.location_on_rounded,
-                                    size: 16, color: AppColors.primary),
+                                Icon(Icons.location_on_rounded,
+                                    size: 16, color: context.colors.primary),
                                 const SizedBox(width: 6),
-                                const Text(
+                                Text(
                                   'DEPARTURE PLACE : ',
                                   style: TextStyle(
                                     fontSize: 11.5,
                                     fontWeight: FontWeight.w700,
-                                    color: AppColors.primary,
+                                    color: context.colors.primary,
                                     letterSpacing: 0.5,
                                   ),
                                 ),
                                 Expanded(
                                   child: Text(
                                     results[i]['place']!,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 14.5,
                                       fontWeight: FontWeight.w800,
-                                      color: AppColors.primary,
+                                      color: context.colors.primary,
                                     ),
                                   ),
                                 ),
@@ -440,14 +487,14 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 12, vertical: 8),
                                   decoration: BoxDecoration(
-                                    color: AppColors.primary
+                                    color: context.colors.primary
                                         .withValues(alpha: 0.15),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   child: Text(
                                     results[i]['time']!,
-                                    style: const TextStyle(
-                                      color: AppColors.primary,
+                                    style: TextStyle(
+                                      color: context.colors.primary,
                                       fontWeight: FontWeight.w700,
                                       fontSize: 14.5,
                                     ),
@@ -557,7 +604,7 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
                         color: context.colors.surfaceAlt,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: AppColors.primary.withValues(alpha: 0.25),
+                          color: context.colors.primary.withValues(alpha: 0.25),
                         ),
                       ),
                       child: Column(
@@ -565,19 +612,19 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
                         children: [
                           Row(
                             children: [
-                              const Icon(
+                              Icon(
                                 Icons.alt_route_rounded,
                                 size: 18,
-                                color: AppColors.primary,
+                                color: context.colors.primary,
                               ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
                                   '${route.routeName} Stops Summary :',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontWeight: FontWeight.w700,
                                     fontSize: 14.5,
-                                    color: AppColors.primary,
+                                    color: context.colors.primary,
                                   ),
                                 ),
                               ),
@@ -645,7 +692,7 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
                     leading: const Icon(Icons.place_outlined),
                     title: Text(p),
                     selected: _selectedPlaceFilter == p,
-                    selectedColor: AppColors.primary,
+                    selectedColor: context.colors.primary,
                     onTap: () {
                       setState(() => _selectedPlaceFilter = p);
                       Navigator.pop(ctx);
@@ -683,7 +730,7 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
                     leading: const Icon(Icons.access_time_rounded),
                     title: Text(t),
                     selected: _selectedTimeFilter == t,
-                    selectedColor: AppColors.primary,
+                    selectedColor: context.colors.primary,
                     onTap: () {
                       setState(() => _selectedTimeFilter = t);
                       Navigator.pop(ctx);
@@ -702,7 +749,7 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => _BusScheduleSearchSheet(),
+      builder: (ctx) => _BusScheduleSearchSheet(categories: _categories),
     );
   }
 }
@@ -746,22 +793,23 @@ class _LiveNextBusSpotlightCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.18),
+                  color: context.colors.primary.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                      color: AppColors.primary.withValues(alpha: 0.5)),
+                      color: context.colors.primary.withValues(alpha: 0.5)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Icon(Icons.bolt_rounded, size: 15, color: AppColors.primary),
-                    SizedBox(width: 4),
+                  children: [
+                    Icon(Icons.bolt_rounded,
+                        size: 15, color: context.colors.primary),
+                    const SizedBox(width: 4),
                     Text(
                       'NEXT DEPARTURE SPOTLIGHT',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
-                        color: AppColors.primary,
+                        color: context.colors.primary,
                         letterSpacing: 0.5,
                       ),
                     ),
@@ -770,7 +818,7 @@ class _LiveNextBusSpotlightCard extends StatelessWidget {
               ),
               const Spacer(),
               Icon(Icons.directions_bus_filled_rounded,
-                  color: AppColors.primary.withValues(alpha: 0.7), size: 22),
+                  color: context.colors.primary.withValues(alpha: 0.7), size: 22),
             ],
           ),
           const SizedBox(height: 12),
@@ -792,10 +840,10 @@ class _LiveNextBusSpotlightCard extends StatelessWidget {
                   children: [
                     Text(
                       'Leaving from: ${sec.departurePlace}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 14.5,
-                        color: AppColors.primary,
+                        color: context.colors.primary,
                       ),
                     ),
                     const SizedBox(height: 3),
@@ -813,11 +861,11 @@ class _LiveNextBusSpotlightCard extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color: AppColors.primary,
+                    color: context.colors.primary,
                     borderRadius: BorderRadius.circular(12),
                     boxShadow: [
                       BoxShadow(
-                        color: AppColors.primary.withValues(alpha: 0.35),
+                        color: context.colors.primary.withValues(alpha: 0.35),
                         blurRadius: 10,
                         offset: const Offset(0, 4),
                       ),
@@ -872,21 +920,22 @@ class _RouteStopTimelineCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: context.colors.surfaceAlt,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.primary.withValues(alpha: 0.35)),
+        border: Border.all(color: context.colors.primary.withValues(alpha: 0.35)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.route_rounded, size: 18, color: AppColors.primary),
+              Icon(Icons.route_rounded,
+                  size: 18, color: context.colors.primary),
               const SizedBox(width: 8),
               Text(
                 'Interactive Route Path ($routeName)',
-                style: const TextStyle(
+                style: TextStyle(
                   fontWeight: FontWeight.w700,
                   fontSize: 15,
-                  color: AppColors.primary,
+                  color: context.colors.primary,
                 ),
               ),
               const Spacer(),
@@ -915,11 +964,11 @@ class _RouteStopTimelineCard extends StatelessWidget {
                           padding: const EdgeInsets.all(3),
                           decoration: BoxDecoration(
                             color: isFirst || isLast
-                                ? AppColors.primary
+                                ? context.colors.primary
                                 : context.colors.surface,
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: AppColors.primary,
+                              color: context.colors.primary,
                               width: 2,
                             ),
                           ),
@@ -932,7 +981,7 @@ class _RouteStopTimelineCard extends StatelessWidget {
                             size: isFirst || isLast ? 13 : 8,
                             color: isFirst || isLast
                                 ? Colors.white
-                                : AppColors.primary,
+                                : context.colors.primary,
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -944,7 +993,7 @@ class _RouteStopTimelineCard extends StatelessWidget {
                                 : FontWeight.w600,
                             fontSize: 12.5,
                             color: isFirst || isLast
-                                ? AppColors.primary
+                                ? context.colors.primary
                                 : context.colors.textPrimary,
                           ),
                         ),
@@ -954,7 +1003,7 @@ class _RouteStopTimelineCard extends StatelessWidget {
                       Container(
                         width: 32,
                         height: 2.5,
-                        color: AppColors.primary.withValues(alpha: 0.4),
+                        color: context.colors.primary.withValues(alpha: 0.4),
                         margin:
                             const EdgeInsets.only(bottom: 22, left: 4, right: 4),
                       ),
@@ -986,38 +1035,44 @@ class _DirectionToggleChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Pressable(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? AppColors.primary.withValues(alpha: 0.18)
-              : context.colors.surfaceAlt,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: isSelected ? AppColors.primary : context.colors.border,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon,
-                size: 14,
-                color: isSelected
-                    ? AppColors.primary
-                    : context.colors.textSecondary),
-            const SizedBox(width: 5),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
-                color: isSelected
-                    ? AppColors.primary
-                    : context.colors.textPrimary,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 44),
+        child: Center(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? context.colors.primary.withValues(alpha: 0.18)
+                  : context.colors.surfaceAlt,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color:
+                    isSelected ? context.colors.primary : context.colors.border,
               ),
             ),
-          ],
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon,
+                    size: 14,
+                    color: isSelected
+                        ? context.colors.primary
+                        : context.colors.textSecondary),
+                const SizedBox(width: 5),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                    color: isSelected
+                        ? context.colors.primary
+                        : context.colors.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -1044,44 +1099,50 @@ class _FilterChipDropdown extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(10),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          decoration: BoxDecoration(
-            color: isActive
-                ? AppColors.primary.withValues(alpha: 0.15)
-                : context.colors.surfaceAlt,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: isActive ? AppColors.primary : context.colors.border,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon,
-                  size: 15,
-                  color: isActive
-                      ? AppColors.primary
-                      : context.colors.textSecondary),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w600,
-                  color: isActive
-                      ? AppColors.primary
-                      : context.colors.textPrimary,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 44),
+          child: Center(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: isActive
+                    ? context.colors.primary.withValues(alpha: 0.15)
+                    : context.colors.surfaceAlt,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color:
+                      isActive ? context.colors.primary : context.colors.border,
                 ),
               ),
-              const SizedBox(width: 4),
-              Icon(Icons.keyboard_arrow_down_rounded,
-                  size: 16,
-                  color: isActive
-                      ? AppColors.primary
-                      : context.colors.textSecondary),
-            ],
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon,
+                      size: 15,
+                      color: isActive
+                          ? context.colors.primary
+                          : context.colors.textSecondary),
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w600,
+                      color: isActive
+                          ? context.colors.primary
+                          : context.colors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(Icons.keyboard_arrow_down_rounded,
+                      size: 16,
+                      color: isActive
+                          ? context.colors.primary
+                          : context.colors.textSecondary),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -1111,15 +1172,15 @@ class _CategoryButton extends StatelessWidget {
           duration: const Duration(milliseconds: 220),
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 11),
           decoration: BoxDecoration(
-            color: isSelected ? AppColors.primary : context.colors.surfaceAlt,
+            color: isSelected ? context.colors.primary : context.colors.surfaceAlt,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isSelected ? AppColors.primary : context.colors.border,
+              color: isSelected ? context.colors.primary : context.colors.border,
             ),
             boxShadow: isSelected
                 ? [
                     BoxShadow(
-                      color: AppColors.primary.withValues(alpha: 0.3),
+                      color: context.colors.primary.withValues(alpha: 0.3),
                       blurRadius: 10,
                       offset: const Offset(0, 4),
                     ),
@@ -1164,10 +1225,10 @@ class _RouteButton extends StatelessWidget {
           duration: const Duration(milliseconds: 220),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
           decoration: BoxDecoration(
-            color: isSelected ? AppColors.primary : context.colors.surfaceAlt,
+            color: isSelected ? context.colors.primary : context.colors.surfaceAlt,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isSelected ? AppColors.primary : context.colors.border,
+              color: isSelected ? context.colors.primary : context.colors.border,
             ),
           ),
           child: Row(
@@ -1189,13 +1250,13 @@ class _RouteButton extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: isSelected
                         ? Colors.white.withValues(alpha: 0.22)
-                        : AppColors.primary.withValues(alpha: 0.15),
+                        : context.colors.primary.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
                     destinationHint,
                     style: TextStyle(
-                      color: isSelected ? Colors.white : AppColors.primary,
+                      color: isSelected ? Colors.white : context.colors.primary,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                     ),
@@ -1232,7 +1293,7 @@ class _BusNamePillTags extends StatelessWidget {
       children: parts.map((name) {
         final isBrtc = name.toUpperCase().contains('BRTC') ||
             name.contains('বিআরটিসি');
-        final tagColor = isBrtc ? AppColors.primary : AppColors.accentCyan;
+        final tagColor = isBrtc ? context.colors.primary : context.colors.accentCyan;
 
         return Container(
           padding: EdgeInsets.symmetric(
@@ -1316,7 +1377,7 @@ class _DepartureSectionCard extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.14),
+              color: context.colors.primary.withValues(alpha: 0.14),
               borderRadius:
                   const BorderRadius.vertical(top: Radius.circular(19)),
             ),
@@ -1325,7 +1386,7 @@ class _DepartureSectionCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: AppColors.primary,
+                    color: context.colors.primary,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Icon(Icons.location_on_rounded,
@@ -1341,16 +1402,16 @@ class _DepartureSectionCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                         fontSize: 10.5,
                         letterSpacing: 0.6,
-                        color: AppColors.primary.withValues(alpha: 0.85),
+                        color: context.colors.primary.withValues(alpha: 0.85),
                       ),
                     ),
                     const SizedBox(height: 1),
                     Text(
                       section.departurePlace,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 16.5,
-                        color: AppColors.primary,
+                        color: context.colors.primary,
                       ),
                     ),
                   ],
@@ -1360,15 +1421,15 @@ class _DepartureSectionCard extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.15),
+                    color: context.colors.primary.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
                     '${section.trips.length} Trips Scheduled',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
-                      color: AppColors.primary,
+                      color: context.colors.primary,
                     ),
                   ),
                 ),
@@ -1379,21 +1440,21 @@ class _DepartureSectionCard extends StatelessWidget {
             _TripGroupSection(
               title: 'Morning Trips (সকাল)',
               icon: Icons.wb_sunny_rounded,
-              iconColor: AppColors.warning,
+              iconColor: context.colors.warning,
               trips: morningTrips,
             ),
           if (afternoonTrips.isNotEmpty)
             _TripGroupSection(
               title: 'Afternoon Trips (দুপুর)',
               icon: Icons.light_mode_rounded,
-              iconColor: AppColors.accentCyan,
+              iconColor: context.colors.accentCyan,
               trips: afternoonTrips,
             ),
           if (eveningTrips.isNotEmpty)
             _TripGroupSection(
               title: 'Evening & Night Trips (রাত)',
               icon: Icons.nights_stay_rounded,
-              iconColor: AppColors.purple,
+              iconColor: context.colors.purple,
               trips: eveningTrips,
             ),
         ],
@@ -1449,21 +1510,24 @@ class _TripGroupSection extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     child: Row(
                       children: [
-                        Container(
-                          width: 88,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 7),
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: AppColors.primary.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            trip.time,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 14,
-                              color: AppColors.primary,
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(minWidth: 88),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 7),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color:
+                                  context.colors.primary.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              trip.time,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 14,
+                                color: context.colors.primary,
+                              ),
                             ),
                           ),
                         ),
@@ -1501,6 +1565,10 @@ class _TripGroupSection extends StatelessWidget {
 }
 
 class _BusScheduleSearchSheet extends StatefulWidget {
+  final List<UniversityBusCategory> categories;
+
+  const _BusScheduleSearchSheet({required this.categories});
+
   @override
   State<_BusScheduleSearchSheet> createState() =>
       _BusScheduleSearchSheetState();
@@ -1514,7 +1582,7 @@ class _BusScheduleSearchSheetState extends State<_BusScheduleSearchSheet> {
     final allResults = <Map<String, String>>[];
     if (query.trim().isNotEmpty) {
       final q = query.toLowerCase();
-      for (final cat in UniversityBusScheduleData.categories) {
+      for (final cat in widget.categories) {
         for (final route in cat.routes) {
           for (final sec in route.departureSections) {
             for (final trip in sec.trips) {
@@ -1536,8 +1604,11 @@ class _BusScheduleSearchSheetState extends State<_BusScheduleSearchSheet> {
       }
     }
 
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.78,
+    return Padding(
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        height: MediaQuery.of(context).size.height * 0.78,
       decoration: BoxDecoration(
         color: Theme.of(context).scaffoldBackgroundColor,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
@@ -1548,7 +1619,7 @@ class _BusScheduleSearchSheetState extends State<_BusScheduleSearchSheet> {
         children: [
           Row(
             children: [
-              const Icon(Icons.search_rounded, color: AppColors.primary),
+              Icon(Icons.search_rounded, color: context.colors.primary),
               const SizedBox(width: 10),
               const Text(
                 'Search Bus Schedule',
@@ -1612,31 +1683,32 @@ class _BusScheduleSearchSheetState extends State<_BusScheduleSearchSheet> {
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 14, vertical: 7),
                                   decoration: BoxDecoration(
-                                    color: AppColors.primary
+                                    color: context.colors.primary
                                         .withValues(alpha: 0.14),
                                     borderRadius: const BorderRadius.vertical(
                                         top: Radius.circular(13)),
                                   ),
                                   child: Row(
                                     children: [
-                                      const Icon(Icons.location_on_rounded,
-                                          size: 15, color: AppColors.primary),
+                                      Icon(Icons.location_on_rounded,
+                                          size: 15,
+                                          color: context.colors.primary),
                                       const SizedBox(width: 6),
-                                      const Text(
+                                      Text(
                                         'DEPARTURE PLACE : ',
                                         style: TextStyle(
                                           fontSize: 11,
                                           fontWeight: FontWeight.w700,
-                                          color: AppColors.primary,
+                                          color: context.colors.primary,
                                         ),
                                       ),
                                       Expanded(
                                         child: Text(
                                           item['place']!,
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize: 14,
                                             fontWeight: FontWeight.w800,
-                                            color: AppColors.primary,
+                                            color: context.colors.primary,
                                           ),
                                         ),
                                       ),
@@ -1651,15 +1723,15 @@ class _BusScheduleSearchSheetState extends State<_BusScheduleSearchSheet> {
                                         padding: const EdgeInsets.symmetric(
                                             horizontal: 10, vertical: 6),
                                         decoration: BoxDecoration(
-                                          color: AppColors.primary
+                                          color: context.colors.primary
                                               .withValues(alpha: 0.15),
                                           borderRadius:
                                               BorderRadius.circular(8),
                                         ),
                                         child: Text(
                                           item['time']!,
-                                          style: const TextStyle(
-                                            color: AppColors.primary,
+                                          style: TextStyle(
+                                            color: context.colors.primary,
                                             fontWeight: FontWeight.w700,
                                           ),
                                         ),
@@ -1695,6 +1767,7 @@ class _BusScheduleSearchSheetState extends State<_BusScheduleSearchSheet> {
                       ),
           ),
         ],
+      ),
       ),
     );
   }

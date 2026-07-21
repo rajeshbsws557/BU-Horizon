@@ -41,7 +41,7 @@ class SegmentedTabs extends StatelessWidget {
                       child: AnimatedDefaultTextStyle(
                         duration: const Duration(milliseconds: 200),
                         style: TextStyle(
-                          color: active ? AppColors.primary : context.colors.textSecondary,
+                          color: active ? context.colors.primary : context.colors.textSecondary,
                           fontWeight: active ? FontWeight.w600 : FontWeight.w500,
                           fontSize: 14,
                         ),
@@ -52,10 +52,10 @@ class SegmentedTabs extends StatelessWidget {
                 );
               }),
             ),
-            AnimatedPositioned(
+            AnimatedPositionedDirectional(
               duration: const Duration(milliseconds: 260),
               curve: Curves.easeOutCubic,
-              left: selected * tabWidth,
+              start: selected * tabWidth,
               bottom: 0,
               child: Container(
                 width: tabWidth,
@@ -64,7 +64,7 @@ class SegmentedTabs extends StatelessWidget {
                   width: tabWidth * 0.5,
                   height: 2.5,
                   decoration: BoxDecoration(
-                    color: AppColors.primary,
+                    color: context.colors.primary,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -120,15 +120,16 @@ class PrimaryButton extends StatelessWidget {
     return Pressable(
       pressedScale: 0.98,
       onTap: onPressed,
+      semanticLabel: label,
       child: Container(
         width: double.infinity,
         height: 52,
         decoration: BoxDecoration(
-          gradient: AppColors.blueGradient,
+          gradient: context.colors.blueGradient,
           borderRadius: BorderRadius.circular(14),
           boxShadow: [
             BoxShadow(
-              color: AppColors.primary.withValues(alpha: 0.35),
+              color: context.colors.primary.withValues(alpha: 0.35),
               blurRadius: 18,
               offset: const Offset(0, 8),
             ),
