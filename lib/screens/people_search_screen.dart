@@ -19,7 +19,8 @@ class PeopleSearchScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
-      create: (_) => PeopleBloc(getIt<PeopleRepository>())..add(const PeopleSearched('')),
+      create: (_) =>
+          PeopleBloc(getIt<PeopleRepository>())..add(const PeopleSearched('')),
       child: const _PeopleSearchView(),
     );
   }
@@ -69,49 +70,53 @@ class _PeopleSearchViewState extends State<_PeopleSearchView> {
       context.colors.danger,
     ];
     return SafeArea(
-      child: Column(
-        children: [
-          const TabHeader(title: 'People Search'),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-            child: SearchField(
-              hint: 'Search by name or department',
-              onChanged: _onSearchChanged,
+      child: ResponsivePage(
+        child: Column(
+          children: [
+            const TabHeader(title: 'People Search'),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+              child: SearchField(
+                hint: 'Search by name or department',
+                onChanged: _onSearchChanged,
+              ),
             ),
-          ),
-          Expanded(
-            child: BlocBuilder<PeopleBloc, PeopleState>(
-              builder: (context, state) {
-                final visible = state.people;
-                return state.isLoading
-                    ? const _PeopleSkeletonList()
-                    : visible.isEmpty
-                        ? const EmptyState(
-                            icon: Icons.person_search_outlined,
-                            title: 'No one found',
-                            message: 'No students or staff match your search. Try another name or department.',
-                          )
-                        : ListView.separated(
-                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                            itemCount: visible.length,
-                            separatorBuilder: (_, __) => const SizedBox(height: 10),
-                            itemBuilder: (_, i) {
-                              final p = visible[i];
-                              return Entrance(
-                                index: i,
-                                stagger: const Duration(milliseconds: 40),
-                                child: _PersonCard(
-                                  person: p,
-                                  color: avatarColors[i % avatarColors.length],
-                                  onMail: () => _mailTo(p.email),
-                                ),
-                              );
-                            },
-                          );
-              },
+            Expanded(
+              child: BlocBuilder<PeopleBloc, PeopleState>(
+                builder: (context, state) {
+                  final visible = state.people;
+                  return state.isLoading
+                      ? const _PeopleSkeletonList()
+                      : visible.isEmpty
+                      ? const EmptyState(
+                          icon: Icons.person_search_outlined,
+                          title: 'No one found',
+                          message:
+                              'No students or staff match your search. Try another name or department.',
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          itemCount: visible.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 10),
+                          itemBuilder: (_, i) {
+                            final p = visible[i];
+                            return Entrance(
+                              index: i,
+                              stagger: const Duration(milliseconds: 40),
+                              child: _PersonCard(
+                                person: p,
+                                color: avatarColors[i % avatarColors.length],
+                                onMail: () => _mailTo(p.email),
+                              ),
+                            );
+                          },
+                        );
+                },
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -135,7 +140,11 @@ class _PeopleSkeletonList extends StatelessWidget {
         ),
         child: const Row(
           children: [
-            Skeleton(height: 44, width: 44, radius: BorderRadius.all(Radius.circular(22))),
+            Skeleton(
+              height: 44,
+              width: 44,
+              radius: BorderRadius.all(Radius.circular(22)),
+            ),
             SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -162,7 +171,11 @@ class _PersonCard extends StatelessWidget {
   final Person person;
   final Color color;
   final VoidCallback onMail;
-  const _PersonCard({required this.person, required this.color, required this.onMail});
+  const _PersonCard({
+    required this.person,
+    required this.color,
+    required this.onMail,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -188,7 +201,11 @@ class _PersonCard extends StatelessWidget {
                     backgroundColor: color.withValues(alpha: 0.18),
                     child: Text(
                       person.initials,
-                      style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 14),
+                      style: TextStyle(
+                        color: color,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -207,11 +224,17 @@ class _PersonCard extends StatelessWidget {
                         const SizedBox(height: 2),
                         Text(
                           person.department,
-                          style: TextStyle(color: context.colors.textSecondary, fontSize: 12),
+                          style: TextStyle(
+                            color: context.colors.textSecondary,
+                            fontSize: 12,
+                          ),
                         ),
                         Text(
                           person.email,
-                          style: TextStyle(color: context.colors.textMuted, fontSize: 11.5),
+                          style: TextStyle(
+                            color: context.colors.textMuted,
+                            fontSize: 11.5,
+                          ),
                         ),
                       ],
                     ),
@@ -223,7 +246,11 @@ class _PersonCard extends StatelessWidget {
           IconButton(
             onPressed: onMail,
             tooltip: 'Email ${person.name}',
-            icon: Icon(Icons.mail_outline_rounded, color: context.colors.primary, size: 20),
+            icon: Icon(
+              Icons.mail_outline_rounded,
+              color: context.colors.primary,
+              size: 20,
+            ),
           ),
         ],
       ),

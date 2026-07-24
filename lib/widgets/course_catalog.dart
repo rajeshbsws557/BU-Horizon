@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../di/di.dart';
 import '../models/course_offering.dart';
+import '../supabase/session_controller.dart';
 import '../theme/app_theme.dart';
 import 'common.dart';
 import 'motion.dart';
+import 'term_selector.dart';
 
 /// Shared course-first list used by class notices, resources and attendance.
-class CourseCatalogView extends StatelessWidget {
+class CourseCatalogView extends StatefulWidget {
   final bool isLoading;
   final bool canManage;
   final List<CourseOffering> courses;
@@ -32,24 +35,60 @@ class CourseCatalogView extends StatelessWidget {
   });
 
   @override
+  State<CourseCatalogView> createState() => _CourseCatalogViewState();
+}
+
+class _CourseCatalogViewState extends State<CourseCatalogView> {
+  int? _selectedTerm;
+
+  @override
   Widget build(BuildContext context) {
+    final availableTerms = widget.courses.map((c) => c.termNumber ?? 1).toSet().toList()..sort();
+    if (_selectedTerm == null || !availableTerms.contains(_selectedTerm)) {
+      _selectedTerm = getIt<SessionController>().profile?.currentTerm;
+    }
+    if ((_selectedTerm == null || !availableTerms.contains(_selectedTerm)) && availableTerms.isNotEmpty) {
+      _selectedTerm = availableTerms.last;
+    }
+    
+    final filteredCourses = widget.courses.where((c) => (c.termNumber ?? 1) == _selectedTerm).toList();
+
     return RefreshIndicator(
       color: context.colors.primary,
       backgroundColor: context.colors.surfaceAlt,
-      onRefresh: onRefresh,
+      onRefresh: widget.onRefresh,
       semanticsLabel: 'Refresh courses',
-      child: isLoading
+      child: widget.isLoading
           ? const _CourseSkeletonList()
-          : courses.isEmpty
+          : filteredCourses.isEmpty && widget.courses.isNotEmpty
+              ? ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: [
+                    TermSelector(
+                      terms: availableTerms,
+                      selectedTerm: _selectedTerm,
+                      onSelected: (term) => setState(() => _selectedTerm = term),
+                    ),
+                    const SizedBox(height: 120),
+                    EmptyState(
+                      icon: widget.emptyIcon,
+                      title: 'No courses this term',
+                      message: widget.canManage
+                          ? 'Add a course for this term to start sharing ${widget.featureName}.'
+                          : 'Your CR has not added any courses for this term yet.',
+                    ),
+                  ],
+                )
+              : filteredCourses.isEmpty
               ? ListView(
                   physics: const AlwaysScrollableScrollPhysics(),
                   children: [
                     const SizedBox(height: 120),
                     EmptyState(
-                      icon: emptyIcon,
+                      icon: widget.emptyIcon,
                       title: 'No courses yet',
-                      message: canManage
-                          ? 'Add your batch courses to start sharing $featureName.'
+                      message: widget.canManage
+                          ? 'Add your batch courses to start sharing ${widget.featureName}.'
                           : 'Your CR has not added any courses for this batch yet.',
                     ),
                   ],
@@ -57,26 +96,39 @@ class CourseCatalogView extends StatelessWidget {
               : ListView.separated(
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.all(AppSpacing.lg),
-                  itemCount: courses.length + 1,
+                  itemCount: filteredCourses.length + 1,
                   separatorBuilder: (_, __) =>
                       const SizedBox(height: AppSpacing.md),
                   itemBuilder: (context, index) {
                     if (index == 0) {
-                      return _CatalogIntro(
-                        count: courses.length,
-                        featureName: featureName,
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (availableTerms.isNotEmpty) ...[
+                            TermSelector(
+                              terms: availableTerms,
+                              selectedTerm: _selectedTerm,
+                              onSelected: (term) => setState(() => _selectedTerm = term),
+                            ),
+                            const SizedBox(height: 16),
+                          ],
+                          _CatalogIntro(
+                            count: filteredCourses.length,
+                            featureName: widget.featureName,
+                          ),
+                        ],
                       );
                     }
-                    final course = courses[index - 1];
+                    final course = filteredCourses[index - 1];
                     return Entrance(
                       index: index - 1,
                       child: _CourseCard(
                         course: course,
-                        canManage: canManage,
-                        onOpen: () => onOpen(course),
-                        onEdit: onEdit == null ? null : () => onEdit!(course),
+                        canManage: widget.canManage,
+                        onOpen: () => widget.onOpen(course),
+                        onEdit: widget.onEdit == null ? null : () => widget.onEdit!(course),
                         onDelete:
-                            onDelete == null ? null : () => onDelete!(course),
+                            widget.onDelete == null ? null : () => widget.onDelete!(course),
                       ),
                     );
                   },

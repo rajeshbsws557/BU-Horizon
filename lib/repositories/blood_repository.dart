@@ -7,6 +7,11 @@ import '../models/models.dart';
 abstract interface class BloodRepository {
   Future<List<BloodRequest>> fetchRequests();
 
+  /// The urgent request currently in its 6-hour home-screen spotlight window
+  /// (the oldest still-active urgent open request), or null if none. Backed by
+  /// the `active_urgent_blood_requests` view, which enforces the 6h cutoff.
+  Future<BloodRequest?> fetchActiveUrgentRequest();
+
   Future<void> createRequest({
     required BloodGroup group,
     required int units,
@@ -22,6 +27,9 @@ abstract interface class BloodRepository {
   /// Responses to [requestId]; only the requester (and the responders
   /// themselves) can see these — enforced by RLS.
   Future<List<ResponseItem>> fetchResponses(String requestId);
+
+  /// Mark a blood request as fulfilled (requester only).
+  Future<void> markFulfilled(String requestId);
 }
 
 @Injectable(as: BloodRepository)
@@ -29,6 +37,9 @@ final class SampleBloodRepository implements BloodRepository {
   @override
   Future<List<BloodRequest>> fetchRequests() async =>
       List.unmodifiable(SampleData.bloodRequests);
+
+  @override
+  Future<BloodRequest?> fetchActiveUrgentRequest() async => null;
 
   @override
   Future<void> createRequest({
@@ -49,4 +60,9 @@ final class SampleBloodRepository implements BloodRepository {
 
   @override
   Future<List<ResponseItem>> fetchResponses(String requestId) async => const [];
+
+  @override
+  Future<void> markFulfilled(String requestId) async {
+    throw StateError('Backend not configured');
+  }
 }

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'bloc/theme_cubit.dart';
+import 'data/local_store.dart';
 import 'di/di.dart';
 import 'navigation/app_router.dart';
 import 'supabase/supabase_config.dart';
@@ -11,6 +13,11 @@ import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // On-device persistence (settings + offline cache). Registered before the
+  // rest of DI so ThemeCubit can restore the saved theme on first frame.
+  final prefs = await SharedPreferences.getInstance();
+  getIt.registerSingleton<LocalStore>(LocalStore(prefs));
 
   // The live project's credentials are baked in as defaults, so this runs for
   // every normal build. Blanking both values via --dart-define keeps the

@@ -9,6 +9,7 @@ import {
   Megaphone,
   ScrollText,
   ShieldCheck,
+  Sparkles,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -91,6 +92,17 @@ export const navigationGroups: NavigationGroup[] = [
         href: "/workflows",
         description: "Requests, approvals and notifications",
         icon: FileClock,
+      },
+    ],
+  },
+  {
+    label: "Forum & clubs",
+    items: [
+      {
+        label: "BU ISSF Club",
+        href: "/club",
+        description: "Club profile, leadership, activities and notices",
+        icon: Sparkles,
       },
     ],
   },

@@ -44,6 +44,8 @@ void _registerSupabaseServices() {
       ..registerFactory<CourseRepository>(SupabaseCourseRepository.new)
       ..registerFactory<NoticeRepository>(SupabaseNoticeRepository.new)
       ..registerFactory<AlertRepository>(SupabaseAlertRepository.new)
+      ..registerFactory<LegalHelpRepository>(SupabaseLegalHelpRepository.new)
+      ..registerFactory<ClassScheduleRepository>(SupabaseClassScheduleRepository.new)
       ..registerFactory<AttendanceRepository>(SupabaseAttendanceRepository.new)
       ..registerFactory<BloodRepository>(SupabaseBloodRepository.new)
       ..registerFactory<BusScheduleRepository>(SupabaseBusScheduleRepository.new)

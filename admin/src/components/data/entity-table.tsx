@@ -13,8 +13,6 @@ import {
   ArrowUp,
   ArrowUpCircle,
   Check,
-  ChevronLeft,
-  ChevronRight,
   ChevronsUpDown,
   CircleAlert,
   CircleCheck,
@@ -32,7 +30,6 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
-  Search,
   Trash2,
   X,
 } from "lucide-react";
@@ -62,6 +59,8 @@ import { capabilitiesFor } from "@/lib/entity-registry";
 import { ConfirmDialog } from "./confirm-dialog";
 import { EntityForm } from "./entity-form";
 import styles from "./entity.module.css";
+import { PaginationFooter } from "./pagination-footer";
+import { SearchBox } from "./search-box";
 
 interface EntityTableProps {
   client: SupabaseClient;
@@ -422,7 +421,6 @@ export function EntityTable({
       : displayColumns(entity, metadata);
   }, [availableColumns, columnSelections, entity, metadata]);
 
-  const totalPages = Math.max(1, Math.ceil((rowsQuery.data?.count ?? 0) / pageSize));
   const rows = rowsQuery.data?.rows ?? [];
   const hasRealMetadata = Boolean(providedMetadata?.columns.length);
 
@@ -653,33 +651,18 @@ export function EntityTable({
       ) : null}
 
       <div className={styles.tableToolbar}>
-        <label className={styles.searchBox}>
-          <Search size={17} />
-          <input
-            aria-label={`Search ${entity.label}`}
-            disabled={entity.searchColumns.length === 0}
-            onChange={(event) => {
-              setSearchInput(event.target.value);
-              setPage(0);
-            }}
-            placeholder={
-              entity.searchColumns.length ? `Search ${entity.label.toLowerCase()}…` : "No text fields to search"
-            }
-            value={searchInput}
-          />
-          {searchInput ? (
-            <button
-              aria-label="Clear search"
-              onClick={() => {
-                setSearchInput("");
-                setPage(0);
-              }}
-              type="button"
-            >
-              <X size={15} />
-            </button>
-          ) : null}
-        </label>
+        <SearchBox
+          ariaLabel={`Search ${entity.label}`}
+          disabled={entity.searchColumns.length === 0}
+          onChange={(value) => {
+            setSearchInput(value);
+            setPage(0);
+          }}
+          placeholder={
+            entity.searchColumns.length ? `Search ${entity.label.toLowerCase()}…` : "No text fields to search"
+          }
+          value={searchInput}
+        />
 
         <div className={styles.toolbarActions}>
           {entity.softDelete ? (
@@ -924,36 +907,18 @@ export function EntityTable({
         ) : null}
       </div>
 
-      <footer className={styles.pagination}>
-        <label>
-          Rows per page
-          <select
-            onChange={(event) => {
-              setPageSize(Number(event.target.value));
-              setPage(0);
-            }}
-            value={pageSize}
-          >
-            {PAGE_SIZES.map((size) => (
-              <option key={size} value={size}>{size}</option>
-            ))}
-          </select>
-        </label>
-        <span>
-          {rowsQuery.data?.count
-            ? `${page * pageSize + 1}–${Math.min((page + 1) * pageSize, rowsQuery.data.count)} of ${rowsQuery.data.count.toLocaleString()}`
-            : "0 rows"}
-        </span>
-        <div>
-          <button aria-label="Previous page" disabled={page <= 0} onClick={() => setPage((value) => value - 1)} type="button">
-            <ChevronLeft size={17} />
-          </button>
-          <span>Page {page + 1} of {totalPages}</span>
-          <button aria-label="Next page" disabled={page + 1 >= totalPages} onClick={() => setPage((value) => value + 1)} type="button">
-            <ChevronRight size={17} />
-          </button>
-        </div>
-      </footer>
+      <PaginationFooter
+        itemLabel="rows"
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(0);
+        }}
+        page={page}
+        pageSize={pageSize}
+        pageSizes={PAGE_SIZES}
+        totalCount={rowsQuery.data?.count ?? 0}
+      />
 
       {form && hasRealMetadata ? (
         <EntityForm

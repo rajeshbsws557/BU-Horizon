@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../data/local_store.dart';
 import '../models/course_offering.dart';
 import '../repositories/course_repository.dart';
 
@@ -29,15 +30,18 @@ final class SupabaseCourseRepository implements CourseRepository {
   @override
   Future<List<CourseOffering>> fetchCourses() async {
     final batchId = await _requireCurrentBatchId();
-    final rows = await _client
-        .from('course_offerings')
-        .select(
-          'id, course_id, batch_id, term_number, teacher_name, '
-          'courses!inner(id, code, title, credit_hours)',
-        )
-        .eq('batch_id', batchId)
-        .isFilter('deleted_at', null)
-        .order('term_number', ascending: true);
+    final rows = await cachedRows('courses.$batchId', () async {
+      final result = await _client
+          .from('course_offerings')
+          .select(
+            'id, course_id, batch_id, term_number, teacher_name, '
+            'courses!inner(id, code, title, credit_hours)',
+          )
+          .eq('batch_id', batchId)
+          .isFilter('deleted_at', null)
+          .order('term_number', ascending: true);
+      return result.cast<Map<String, dynamic>>();
+    });
 
     final courses = rows.map((row) {
       final course = row['courses'] as Map<String, dynamic>;

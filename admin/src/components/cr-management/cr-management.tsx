@@ -8,8 +8,6 @@ import {
 } from "@tanstack/react-query";
 import {
   BadgeCheck,
-  ChevronLeft,
-  ChevronRight,
   CircleAlert,
   Crown,
   Filter,
@@ -25,6 +23,8 @@ import {
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/data/confirm-dialog";
+import { PaginationFooter } from "@/components/data/pagination-footer";
+import { SearchBox } from "@/components/data/search-box";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { createBrowserClient } from "@/lib/supabase/client";
 
@@ -259,7 +259,6 @@ export function CrManagement() {
   const data = referenceQuery.data;
   const profiles = profilesQuery.data?.profiles ?? [];
   const profileCount = profilesQuery.data?.count ?? 0;
-  const totalPages = Math.max(1, Math.ceil(profileCount / pageSize));
   const isLoading = referenceQuery.isLoading || profilesQuery.isLoading;
   const isFetching = referenceQuery.isFetching || profilesQuery.isFetching;
   const error = referenceQuery.error ?? profilesQuery.error;
@@ -404,17 +403,15 @@ export function CrManagement() {
         </header>
 
         <div className={styles.toolbar}>
-          <label className={styles.searchBox}>
-            <Search size={17} />
-            <input
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setPage(0);
-              }}
-              placeholder="Search name, email, student ID, or roll…"
-              value={search}
-            />
-          </label>
+          <SearchBox
+            ariaLabel="Search accounts"
+            onChange={(value) => {
+              setSearch(value);
+              setPage(0);
+            }}
+            placeholder="Search name, email, student ID, or roll…"
+            value={search}
+          />
           <label className={styles.filterSelect}>
             <Filter size={15} />
             <select
@@ -580,50 +577,23 @@ export function CrManagement() {
           </div>
         ) : null}
 
-        <footer className={styles.panelFooter}>
-          <label className={styles.pageSize}>
-            Rows per page
-            <select
-              onChange={(event) => {
-                setPageSize(Number(event.target.value));
-                setPage(0);
-              }}
-              value={pageSize}
-            >
-              {PAGE_SIZES.map((size) => (
-                <option key={size} value={size}>{size}</option>
-              ))}
-            </select>
-          </label>
-          <span className={styles.pageRange}>
-            {profileCount
-              ? `${page * pageSize + 1}-${Math.min((page + 1) * pageSize, profileCount)} of ${profileCount.toLocaleString()}`
-              : "0 accounts"}
-          </span>
-          <div className={styles.pageControls}>
-            <button
-              aria-label="Previous page"
-              disabled={page === 0}
-              onClick={() => setPage((current) => Math.max(0, current - 1))}
-              type="button"
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <span>Page {page + 1} of {totalPages}</span>
-            <button
-              aria-label="Next page"
-              disabled={page + 1 >= totalPages}
-              onClick={() => setPage((current) => current + 1)}
-              type="button"
-            >
-              <ChevronRight size={16} />
-            </button>
-          </div>
+        <PaginationFooter
+          itemLabel="accounts"
+          onPageChange={setPage}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setPage(0);
+          }}
+          page={page}
+          pageSize={pageSize}
+          pageSizes={PAGE_SIZES}
+          totalCount={profileCount}
+        >
           <div className={styles.capacityRule}>
             <ShieldCheck size={16} />
             <span>A batch may have at most two CRs. A student can represent only their own batch.</span>
           </div>
-        </footer>
+        </PaginationFooter>
       </section>
 
       <ConfirmDialog

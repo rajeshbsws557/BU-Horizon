@@ -8,8 +8,10 @@ import '../screens/attendance_screen.dart';
 import '../screens/blood_help_screen.dart';
 import '../screens/bus_schedule_screen.dart';
 import '../screens/class_notices_screen.dart';
+import '../screens/club_screen.dart';
 import '../screens/exam_schedule_screen.dart';
 import '../screens/home_screen.dart';
+import '../screens/legal_help_screen.dart';
 import '../screens/login_screen.dart';
 import '../screens/lost_found_screen.dart';
 import '../screens/main_scaffold.dart';
@@ -27,6 +29,7 @@ abstract class AppRoutes {
 
   static const String home = '/';
   static const String search = '/search';
+  static const String club = '/club';
   static const String alerts = '/alerts';
   static const String profile = '/profile';
   static const String bus = '/bus';
@@ -37,6 +40,7 @@ abstract class AppRoutes {
   static const String exams = '/exams';
   static const String resources = '/resources';
   static const String about = '/about';
+  static const String legalHelp = '/legal-help';
   static const String login = '/login';
   static const String register = '/register';
   static const String splash = '/splash';
@@ -108,8 +112,8 @@ final GoRouter appRouter = GoRouter(
         StatefulShellBranch(
           routes: [
             GoRoute(
-              path: AppRoutes.search,
-              builder: (_, __) => const PeopleSearchScreen(),
+              path: AppRoutes.club,
+              builder: (_, __) => const ClubScreen(),
             ),
           ],
         ),
@@ -140,12 +144,20 @@ final GoRouter appRouter = GoRouter(
       ],
     ),
     GoRoute(
+      path: AppRoutes.search,
+      builder: (_, __) => const PeopleSearchScreen(),
+    ),
+    GoRoute(
       path: AppRoutes.bus,
       builder: (_, __) => const BusScheduleScreen(),
     ),
     GoRoute(
       path: AppRoutes.notices,
       builder: (_, __) => const ClassNoticesScreen(),
+    ),
+    GoRoute(
+      path: AppRoutes.legalHelp,
+      builder: (_, __) => const LegalHelpScreen(),
     ),
     GoRoute(
       path: AppRoutes.blood,

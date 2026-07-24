@@ -19,6 +19,23 @@
   --warning: #b45309;
   --purple: #7c3aed;
   --gold: #9a6a22;
+  --danger-solid: #d92d20;
+  --danger-solid-hover: #b42318;
+  --danger-strong: #b42318;
+  --danger-soft: #fef3f2;
+  --danger-border: #fecdca;
+  --warning-strong: #b54708;
+  --warning-soft: #fffaeb;
+  --warning-border: #fedf89;
+  --success-strong: #067647;
+  --success-soft: #ecfdf3;
+  --purple-strong: #6941c6;
+  --purple-soft: #f4f0ff;
+  --info-strong: #175cd3;
+  --info-soft: #eff8ff;
+  --info-border: #b2ddff;
+  --neutral-strong: #475467;
+  --neutral-soft: #f2f4f7;
   --text-primary: #101828;
   --text-secondary: #344054;
   --text-muted: #475467;
@@ -64,6 +81,23 @@
   --warning: #fbbf24;
   --purple: #b69cff;
   --gold: #facc15;
+  --danger-solid: #d92d20;
+  --danger-solid-hover: #b42318;
+  --danger-strong: #fda4af;
+  --danger-soft: rgb(180 35 24 / 25%);
+  --danger-border: rgb(217 45 32 / 34%);
+  --warning-strong: #fde68a;
+  --warning-soft: rgb(181 71 8 / 25%);
+  --warning-border: rgb(247 144 9 / 38%);
+  --success-strong: #86efac;
+  --success-soft: rgb(6 118 71 / 25%);
+  --purple-strong: #d2c1ff;
+  --purple-soft: rgb(105 65 198 / 25%);
+  --info-strong: #9dcbff;
+  --info-soft: rgb(23 92 211 / 17%);
+  --info-border: rgb(46 144 250 / 38%);
+  --neutral-strong: #d0d5dd;
+  --neutral-soft: rgb(71 84 103 / 36%);
   --text-primary: #f8fafc;
   --text-secondary: #d2d9e7;
   --text-muted: #b0bbcf;
@@ -806,8 +840,8 @@ a {
 
 .icon-button {
   display: grid;
-  width: 42px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
   place-items: center;
   border: 1px solid var(--border);
   border-radius: 11px;

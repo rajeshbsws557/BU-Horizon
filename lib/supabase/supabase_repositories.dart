@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../data/local_store.dart';
 import '../data/university_bus_schedule_data.dart';
 import '../models/models.dart';
 import '../repositories/repositories.dart';
@@ -64,6 +65,13 @@ String _fmtDate(String? yyyymmdd) {
   final dt = DateTime.tryParse(yyyymmdd);
   if (dt == null) return '';
   return DateFormat('EEE, MMM d').format(dt);
+}
+
+/// Trims a text field and collapses blanks to null so optional columns stay
+/// null rather than empty strings.
+String? _nullIfBlank(String? value) {
+  final trimmed = value?.trim() ?? '';
+  return trimmed.isEmpty ? null : trimmed;
 }
 
 final class SupabaseNoticeRepository implements NoticeRepository {
@@ -129,35 +137,43 @@ final class SupabaseNoticeRepository implements NoticeRepository {
 
   @override
   Future<List<ClassNotice>> fetchNotices() async {
-    final rows = await _client
-        .from('notices')
-        .select(
-          'id, offering_id, title, body, category, scope, is_pinned, '
-          'published_at, created_at',
-        )
-        .isFilter('offering_id', null)
-        .isFilter('deleted_at', null)
-        .eq('state', 'published')
-        .order('is_pinned', ascending: false)
-        .order('published_at', ascending: false)
-        .limit(50);
+    // Public Notices: university-scope, published. Read-through cache so guests
+    // and students can still see the last-fetched notices while offline.
+    final rows = await cachedRows('public_notices', () async {
+      final result = await _client
+          .from('notices')
+          .select(
+            'id, offering_id, title, body, category, scope, is_pinned, '
+            'published_at, created_at',
+          )
+          .eq('scope', 'university')
+          .isFilter('deleted_at', null)
+          .eq('state', 'published')
+          .order('is_pinned', ascending: false)
+          .order('published_at', ascending: false)
+          .limit(50);
+      return result.cast<Map<String, dynamic>>();
+    });
     return rows.map(_fromRow).toList();
   }
 
   @override
   Future<List<ClassNotice>> fetchCourseNotices(String offeringId) async {
-    final rows = await _client
-        .from('notices')
-        .select(
-          'id, offering_id, title, body, category, is_pinned, published_at, '
-          'created_at',
-        )
-        .eq('offering_id', offeringId)
-        .eq('state', 'published')
-        .isFilter('deleted_at', null)
-        .order('is_pinned', ascending: false)
-        .order('published_at', ascending: false)
-        .limit(100);
+    final rows = await cachedRows('course_notices.$offeringId', () async {
+      final result = await _client
+          .from('notices')
+          .select(
+            'id, offering_id, title, body, category, is_pinned, published_at, '
+            'created_at',
+          )
+          .eq('offering_id', offeringId)
+          .eq('state', 'published')
+          .isFilter('deleted_at', null)
+          .order('is_pinned', ascending: false)
+          .order('published_at', ascending: false)
+          .limit(100);
+      return result.cast<Map<String, dynamic>>();
+    });
     return rows.map(_fromRow).toList();
   }
 
@@ -245,6 +261,110 @@ final class SupabaseAlertRepository implements AlertRepository {
   }
 }
 
+final class SupabaseClassScheduleRepository implements ClassScheduleRepository {
+  static DateTime _date(Object? value) {
+    final parsed = DateTime.tryParse(value?.toString() ?? '');
+    if (parsed == null) throw const FormatException('Invalid schedule date');
+    return DateTime(parsed.year, parsed.month, parsed.day);
+  }
+
+  @override
+  Future<List<ScheduledClass>> fetchCourseSchedules(String offeringId) async {
+    // Reverse-embed the linked attendance session (via class_sessions.schedule_id)
+    // to know whether attendance has already been recorded for the class.
+    final rows = await cachedRows('schedules.$offeringId', () async {
+      final result = await _client
+          .from('class_schedules')
+          .select(
+            'id, offering_id, schedule_date, start_time, end_time, room, note, '
+            'type, class_sessions!left(id, deleted_at)',
+          )
+          .eq('offering_id', offeringId)
+          .isFilter('deleted_at', null)
+          .order('schedule_date', ascending: false)
+          .order('start_time', ascending: false);
+      return result.cast<Map<String, dynamic>>();
+    });
+
+    return rows.map((row) {
+      final sessions = (row['class_sessions'] as List<dynamic>? ?? const [])
+          .cast<Map<String, dynamic>>()
+          .where((s) => s['deleted_at'] == null);
+      final sessionId = sessions.isEmpty ? null : sessions.first['id'] as String?;
+      return ScheduledClass(
+        id: row['id'] as String,
+        offeringId: (row['offering_id'] as String?) ?? offeringId,
+        date: _date(row['schedule_date']),
+        startTime: row['start_time'] as String?,
+        endTime: row['end_time'] as String?,
+        room: row['room'] as String?,
+        note: row['note'] as String?,
+        type: (row['type'] as String?) ?? 'one_time',
+        sessionId: sessionId,
+      );
+    }).toList();
+  }
+
+  Map<String, dynamic> _payload(ScheduleDraft draft) => {
+    'offering_id': draft.offeringId,
+    'type': draft.type,
+    'schedule_date': DateFormat('yyyy-MM-dd').format(draft.date),
+    'start_time': draft.startTime,
+    'end_time': draft.endTime,
+    'room': _nullIfBlank(draft.room),
+    'note': _nullIfBlank(draft.note),
+  };
+
+  @override
+  Future<void> createSchedule(ScheduleDraft draft) async {
+    final batchId = await _requireCurrentBatchId();
+    await _client.from('class_schedules').insert({
+      'batch_id': batchId,
+      'created_by': _uid,
+      ..._payload(draft),
+    });
+  }
+
+  @override
+  Future<void> updateSchedule(String scheduleId, ScheduleDraft draft) async {
+    await _client
+        .from('class_schedules')
+        .update(_payload(draft))
+        .eq('id', scheduleId);
+  }
+
+  @override
+  Future<void> deleteSchedule(String scheduleId) async {
+    await _client
+        .from('class_schedules')
+        .update({'deleted_at': DateTime.now().toUtc().toIso8601String()})
+        .eq('id', scheduleId);
+  }
+}
+
+final class SupabaseLegalHelpRepository implements LegalHelpRepository {
+  @override
+  Future<void> submitReport(LegalHelpDraft draft) async {
+    await _client.from('cyberbullying_reports').insert({
+      // Anonymous reports (and guest submissions) carry no reporter identity.
+      'reporter_id': draft.isAnonymous ? null : _uid,
+      'is_anonymous': draft.isAnonymous,
+      'reporter_name': draft.isAnonymous ? null : _nullIfBlank(draft.reporterName),
+      'contact_email': _nullIfBlank(draft.contactEmail),
+      'contact_phone': _nullIfBlank(draft.contactPhone),
+      'category': draft.category.wire,
+      'incident_platform': _nullIfBlank(draft.incidentPlatform),
+      'incident_date': draft.incidentDate == null
+          ? null
+          : DateFormat('yyyy-MM-dd').format(draft.incidentDate!),
+      'location': _nullIfBlank(draft.location),
+      'involved_parties': _nullIfBlank(draft.involvedParties),
+      'description': draft.description.trim(),
+      'evidence_url': _nullIfBlank(draft.evidenceUrl),
+    });
+  }
+}
+
 final class SupabasePeopleRepository implements PeopleRepository {
   @override
   Future<List<Person>> search(String query) async {
@@ -297,12 +417,15 @@ final class SupabaseAttendanceRepository implements AttendanceRepository {
       );
     }
 
-    final rows = await _client
-        .from('attendance_records')
-        .select('status, class_sessions!inner(offering_id, deleted_at)')
-        .eq('student_id', uid)
-        .eq('class_sessions.offering_id', offeringId)
-        .isFilter('class_sessions.deleted_at', null);
+    final rows = await cachedRows('att_course.$offeringId.$uid', () async {
+      final result = await _client
+          .from('attendance_records')
+          .select('status, class_sessions!inner(offering_id, deleted_at)')
+          .eq('student_id', uid)
+          .eq('class_sessions.offering_id', offeringId)
+          .isFilter('class_sessions.deleted_at', null);
+      return result.cast<Map<String, dynamic>>();
+    });
 
     var present = 0;
     for (final row in rows) {
@@ -320,16 +443,19 @@ final class SupabaseAttendanceRepository implements AttendanceRepository {
     final uid = _uid;
     if (uid == null) return const [];
 
-    final rows = await _client
-        .from('class_sessions')
-        .select(
-          'id, offering_id, session_date, start_time, end_time, topic, '
-          'attendance_records(student_id, status)',
-        )
-        .eq('offering_id', offeringId)
-        .isFilter('deleted_at', null)
-        .order('session_date', ascending: false)
-        .order('start_time', ascending: false);
+    final rows = await cachedRows('att_sessions.$offeringId.$uid', () async {
+      final result = await _client
+          .from('class_sessions')
+          .select(
+            'id, offering_id, session_date, start_time, end_time, topic, '
+            'attendance_records(student_id, status)',
+          )
+          .eq('offering_id', offeringId)
+          .isFilter('deleted_at', null)
+          .order('session_date', ascending: false)
+          .order('start_time', ascending: false);
+      return result.cast<Map<String, dynamic>>();
+    });
 
     return rows.map((row) {
       final records = (row['attendance_records'] as List<dynamic>? ?? const [])
@@ -423,6 +549,17 @@ final class SupabaseAttendanceRepository implements AttendanceRepository {
     if (sessionId == null || sessionId.isEmpty) {
       throw StateError('Attendance RPC did not return a session ID');
     }
+    // Link the freshly-recorded session back to the scheduled class so the
+    // schedule shows as "attendance recorded". Best-effort: attendance is
+    // already saved, so a failed link must not surface as a save failure.
+    if (draft.scheduleId != null && draft.scheduleId!.isNotEmpty) {
+      try {
+        await _client
+            .from('class_sessions')
+            .update({'schedule_id': draft.scheduleId})
+            .eq('id', sessionId);
+      } catch (_) {}
+    }
     return sessionId;
   }
 
@@ -440,14 +577,17 @@ final class SupabaseAttendanceRepository implements AttendanceRepository {
     if (uid == null) return const [];
     // RLS already restricts rows to the student's own records; the explicit
     // filter just keeps the query honest.
-    final rows = await _client
-        .from('attendance_records')
-        .select(
-          'status, class_sessions!inner(deleted_at, '
-          'course_offerings!inner(courses!inner(code, title)))',
-        )
-        .eq('student_id', uid)
-        .isFilter('class_sessions.deleted_at', null);
+    final rows = await cachedRows('att_summary.$uid', () async {
+      final result = await _client
+          .from('attendance_records')
+          .select(
+            'status, class_sessions!inner(deleted_at, '
+            'course_offerings!inner(courses!inner(code, title)))',
+          )
+          .eq('student_id', uid)
+          .isFilter('class_sessions.deleted_at', null);
+      return result.cast<Map<String, dynamic>>();
+    });
     final byCourse = <String, ({String title, int present, int total})>{};
     for (final row in rows) {
       final session = row['class_sessions'] as Map<String, dynamic>?;
@@ -487,32 +627,120 @@ final class SupabaseExamRepository implements ExamRepository {
     _ => 'Exam',
   };
 
+  static ExamItem _fromRow(Map<String, dynamic> row) {
+    final offering = row['course_offerings'] as Map<String, dynamic>?;
+    final course = offering?['courses'] as Map<String, dynamic>?;
+    final start = _fmtTime(row['start_time'] as String?);
+    final end = _fmtTime(row['end_time'] as String?);
+    return ExamItem(
+      id: row['id'] as String,
+      offeringId: (row['offering_id'] as String?) ?? '',
+      title: (row['title'] as String?) ?? '',
+      typeLabel: _typeLabel(row['type'] as String?),
+      dateLabel: _fmtDate(row['exam_date'] as String?),
+      timeLabel: [start, end].where((s) => s.isNotEmpty).join(' – '),
+      courseCode: (course?['code'] as String?) ?? '',
+      room: (row['room'] as String?) ?? '',
+      description: (row['description'] as String?) ?? '',
+      termNumber: offering?['term_number'] as int?,
+    );
+  }
+
   @override
   Future<List<ExamItem>> fetchExams() async {
-    final rows = await _client
-        .from('exams')
-        .select(
-          'id, type, title, description, exam_date, start_time, end_time, room, course_offerings(courses(code))',
-        )
-        .isFilter('deleted_at', null)
-        .order('exam_date', ascending: true)
-        .limit(50);
-    return rows.map((row) {
-      final offering = row['course_offerings'] as Map<String, dynamic>?;
-      final course = offering?['courses'] as Map<String, dynamic>?;
-      final start = _fmtTime(row['start_time'] as String?);
-      final end = _fmtTime(row['end_time'] as String?);
-      return ExamItem(
-        id: row['id'] as String,
-        title: (row['title'] as String?) ?? '',
-        typeLabel: _typeLabel(row['type'] as String?),
-        dateLabel: _fmtDate(row['exam_date'] as String?),
-        timeLabel: [start, end].where((s) => s.isNotEmpty).join(' – '),
-        courseCode: (course?['code'] as String?) ?? '',
-        room: (row['room'] as String?) ?? '',
-        description: (row['description'] as String?) ?? '',
-      );
-    }).toList();
+    final rows = await cachedRows('exams.${_uid ?? 'guest'}', () async {
+      final result = await _client
+          .from('exams')
+          .select(
+            'id, offering_id, type, title, description, exam_date, start_time, end_time, room, course_offerings(term_number, courses(code))',
+          )
+          .isFilter('deleted_at', null)
+          .order('exam_date', ascending: true)
+          .limit(50);
+      return result.cast<Map<String, dynamic>>();
+    });
+    return rows.map(_fromRow).toList();
+  }
+
+  @override
+  Future<List<ExamItem>> fetchCourseExams(String offeringId) async {
+    final rows = await cachedRows('exams.course.$offeringId', () async {
+      final result = await _client
+          .from('exams')
+          .select(
+            'id, offering_id, type, title, description, exam_date, start_time, end_time, room, course_offerings(term_number, courses(code))',
+          )
+          .eq('offering_id', offeringId)
+          .isFilter('deleted_at', null)
+          .order('exam_date', ascending: true)
+          .limit(50);
+      return result.cast<Map<String, dynamic>>();
+    });
+    return rows.map(_fromRow).toList();
+  }
+
+  static String _typeValue(String raw) => switch (raw.toLowerCase()) {
+    'midterm' => 'midterm',
+    'final' => 'final',
+    'quiz' => 'quiz',
+    _ => 'other',
+  };
+
+  static String? _fmtTimeStr(TimeOfDay? t) {
+    if (t == null) return null;
+    return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}:00';
+  }
+
+  @override
+  Future<void> createExam({
+    required String offeringId,
+    required ExamInput input,
+  }) async {
+    final batchId = await _requireCurrentBatchId();
+    await _client.from('exams').insert({
+      'batch_id': batchId,
+      'offering_id': offeringId,
+      'type': _typeValue(input.type),
+      'title': input.title.trim(),
+      'description': input.description?.trim().isEmpty == true
+          ? null
+          : input.description?.trim(),
+      'exam_date': input.examDate != null
+          ? DateFormat('yyyy-MM-dd').format(input.examDate!)
+          : null,
+      'start_time': _fmtTimeStr(input.startTime),
+      'end_time': _fmtTimeStr(input.endTime),
+      'room': input.room?.trim().isEmpty == true ? null : input.room?.trim(),
+      'created_by': _uid,
+    });
+  }
+
+  @override
+  Future<void> updateExam({
+    required String examId,
+    required ExamInput input,
+  }) async {
+    await _client.from('exams').update({
+      'type': _typeValue(input.type),
+      'title': input.title.trim(),
+      'description': input.description?.trim().isEmpty == true
+          ? null
+          : input.description?.trim(),
+      'exam_date': input.examDate != null
+          ? DateFormat('yyyy-MM-dd').format(input.examDate!)
+          : null,
+      'start_time': _fmtTimeStr(input.startTime),
+      'end_time': _fmtTimeStr(input.endTime),
+      'room': input.room?.trim().isEmpty == true ? null : input.room?.trim(),
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', examId);
+  }
+
+  @override
+  Future<void> deleteExam(String examId) async {
+    await _client.from('exams').update({
+      'deleted_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', examId);
   }
 }
 
@@ -914,6 +1142,31 @@ final class SupabaseBloodRepository implements BloodRepository {
   }
 
   @override
+  Future<BloodRequest?> fetchActiveUrgentRequest() async {
+    // The view already applies is_urgent + status='open' + the 6h cutoff.
+    // Oldest still-active request first; take one as the current spotlight.
+    final rows = await _client
+        .from('active_urgent_blood_requests')
+        .select('id, requester_id, blood_group, units, contact, location, note, is_urgent, created_at')
+        .order('created_at', ascending: true)
+        .limit(1);
+    if (rows.isEmpty) return null;
+    final row = rows.first;
+    final uid = _uid;
+    return BloodRequest(
+      id: row['id'] as String,
+      group: _group(row['blood_group'] as String?),
+      location: (row['location'] as String?) ?? '',
+      time: _relativeTime(row['created_at'] as String?),
+      units: (row['units'] as num?)?.toInt() ?? 1,
+      contact: (row['contact'] as String?) ?? '',
+      note: (row['note'] as String?) ?? '',
+      isUrgent: (row['is_urgent'] as bool?) ?? false,
+      isMine: uid != null && row['requester_id'] == uid,
+    );
+  }
+
+  @override
   Future<void> createRequest({
     required BloodGroup group,
     required int units,
@@ -959,6 +1212,20 @@ final class SupabaseBloodRepository implements BloodRepository {
         .eq('request_id', requestId)
         .order('created_at', ascending: false);
     return _withResponderNames(rows);
+  }
+
+  @override
+  Future<void> markFulfilled(String requestId) async {
+    final uid = _uid;
+    if (uid == null) throw StateError('Sign in required');
+    // RLS restricts the update to the request's owner (or a super admin).
+    await _client
+        .from('blood_requests')
+        .update({
+          'status': 'fulfilled',
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', requestId);
   }
 }
 

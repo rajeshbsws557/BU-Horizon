@@ -75,11 +75,10 @@ export function LoginForm({ nextPath, initialError }: LoginFormProps) {
 
       if (assurance?.currentLevel !== "aal2") {
         const next = encodeURIComponent(nextPath);
-        router.replace(`/mfa?next=${next}`);
+        window.location.assign(`/mfa?next=${next}`);
       } else {
-        router.replace(nextPath);
+        window.location.assign(nextPath);
       }
-      router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to sign in.");
     } finally {

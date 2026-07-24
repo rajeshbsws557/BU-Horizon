@@ -1,36 +1,24 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../di/di.dart';
 import '../models/models.dart';
-import '../repositories/alert_repository.dart';
+import '../repositories/notice_repository.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/motion.dart';
 
-/// Rendered as the "Alerts" tab (no back button).
-class AlertsScreen extends StatelessWidget {
+/// Public Notices tab — university-wide notices published by the authority
+/// (super admin). Readable by guests and registered students alike.
+class AlertsScreen extends StatefulWidget {
   const AlertsScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return BlocProvider(
-      create: (_) => AlertCubit(),
-      child: const _AlertsView(),
-    );
-  }
+  State<AlertsScreen> createState() => _AlertsScreenState();
 }
 
-class _AlertsView extends StatefulWidget {
-  const _AlertsView();
-
-  @override
-  State<_AlertsView> createState() => _AlertsViewState();
-}
-
-class _AlertsViewState extends State<_AlertsView> {
+class _AlertsScreenState extends State<AlertsScreen> {
   bool _loading = true;
-  List<AlertItem> _alerts = const [];
+  List<ClassNotice> _notices = const [];
 
   @override
   void initState() {
@@ -39,12 +27,12 @@ class _AlertsViewState extends State<_AlertsView> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    if (mounted) setState(() => _loading = true);
     try {
-      final alerts = await getIt<AlertRepository>().fetchAlerts();
+      final notices = await getIt<NoticeRepository>().fetchNotices();
       if (!mounted) return;
       setState(() {
-        _alerts = alerts;
+        _notices = notices;
         _loading = false;
       });
     } catch (_) {
@@ -53,62 +41,124 @@ class _AlertsViewState extends State<_AlertsView> {
     }
   }
 
-  Future<void> _refresh() => _load();
-
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: Column(
-        children: [
-          const TabHeader(title: 'Alerts'),
-          const SizedBox(height: 4),
-          BlocBuilder<AlertCubit, int>(
-            builder: (context, tab) => SegmentedTabs(
-              tabs: const ['All', 'Bus', 'Notices', 'Others'],
-              selected: tab,
-              onChanged: (i) => context.read<AlertCubit>().setTab(i),
+      child: ResponsivePage(
+        child: Column(
+          children: [
+            const TabHeader(
+              title: 'Public Notices',
+              subtitle: 'Official announcements for the whole campus',
             ),
+            Expanded(
+              child: RefreshIndicator(
+                color: context.colors.primary,
+                backgroundColor: context.colors.surfaceAlt,
+                onRefresh: _load,
+                child: _loading
+                    ? const _SkeletonList()
+                    : _notices.isEmpty
+                    ? ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: const [
+                          SizedBox(height: 120),
+                          EmptyState(
+                            icon: Icons.campaign_outlined,
+                            title: 'No public notices yet',
+                            message:
+                                'University announcements will appear here when published.',
+                          ),
+                        ],
+                      )
+                    : ListView.separated(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.all(16),
+                        itemCount: _notices.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 12),
+                        itemBuilder: (_, i) => Entrance(
+                          index: i,
+                          child: _NoticeCard(notice: _notices[i]),
+                        ),
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NoticeCard extends StatelessWidget {
+  final ClassNotice notice;
+  const _NoticeCard({required this.notice});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = context.colors.resolve(notice.color);
+    final body = notice.body.isEmpty ? notice.subtitle : notice.body;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: cardDecoration(context: context),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Icon(notice.icon, color: color, size: 20),
           ),
+          const SizedBox(width: 12),
           Expanded(
-            child: BlocBuilder<AlertCubit, int>(
-              builder: (context, tab) {
-                final visible = switch (tab) {
-                  1 => _alerts.where((a) => a.type == AlertType.bus).toList(),
-                  2 => _alerts
-                      .where((a) =>
-                          a.type == AlertType.notice || a.type == AlertType.exam)
-                      .toList(),
-                  3 => _alerts
-                      .where((a) =>
-                          a.type == AlertType.event ||
-                          a.type == AlertType.library ||
-                          a.type == AlertType.lostFound)
-                      .toList(),
-                  _ => _alerts,
-                };
-                return RefreshIndicator(
-                  color: context.colors.primary,
-                  backgroundColor: context.colors.surfaceAlt,
-                  onRefresh: _refresh,
-                  semanticsLabel: 'Refresh alerts',
-                  child: _loading
-                      ? const _AlertSkeletonList()
-                      : visible.isEmpty
-                          ? const EmptyState(
-                              icon: Icons.notifications_off_outlined,
-                              title: 'All caught up',
-                              message: 'No alerts in this category. You are all clear.',
-                            )
-                          : ListView.separated(
-                              physics: const AlwaysScrollableScrollPhysics(),
-                              padding: const EdgeInsets.all(16),
-                              itemCount: visible.length,
-                              separatorBuilder: (_, __) => const SizedBox(height: 12),
-                              itemBuilder: (_, i) =>
-                                  Entrance(index: i, child: _AlertCard(alert: visible[i])),
-                            ),
-                );
-              },
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    if (notice.isPinned) ...[
+                      Icon(
+                        Icons.push_pin_rounded,
+                        size: 13,
+                        color: context.colors.warning,
+                      ),
+                      const SizedBox(width: 4),
+                    ],
+                    Expanded(
+                      child: Text(
+                        notice.title,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14.5,
+                          color: context.colors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      notice.time,
+                      style: TextStyle(
+                        color: context.colors.textMuted,
+                        fontSize: 11.5,
+                      ),
+                    ),
+                  ],
+                ),
+                if (body.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    body,
+                    style: TextStyle(
+                      color: context.colors.textSecondary,
+                      fontSize: 12.5,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],
@@ -117,27 +167,27 @@ class _AlertsViewState extends State<_AlertsView> {
   }
 }
 
-class _AlertSkeletonList extends StatelessWidget {
-  const _AlertSkeletonList();
+class _SkeletonList extends StatelessWidget {
+  const _SkeletonList();
 
   @override
   Widget build(BuildContext context) {
     return ListView.separated(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
-      itemCount: 4,
+      itemCount: 5,
       separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (context, __) => Container(
+      itemBuilder: (_, __) => Container(
         padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: context.colors.surfaceAlt,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: context.colors.border),
-        ),
+        decoration: cardDecoration(context: context),
         child: const Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Skeleton(height: 42, width: 42, radius: BorderRadius.all(Radius.circular(11))),
+            Skeleton(
+              height: 42,
+              width: 42,
+              radius: BorderRadius.all(Radius.circular(11)),
+            ),
             SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -145,96 +195,9 @@ class _AlertSkeletonList extends StatelessWidget {
                 children: [
                   Skeleton(height: 14, width: 150),
                   SizedBox(height: 8),
-                  Skeleton(height: 12, width: 190),
+                  Skeleton(height: 12, width: 220),
                 ],
               ),
-            ),
-            SizedBox(width: 8),
-            Skeleton(height: 12, width: 54),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class AlertCubit extends Cubit<int> {
-  AlertCubit() : super(0);
-
-  void setTab(int tab) => emit(tab);
-}
-
-class _AlertCard extends StatelessWidget {
-  final AlertItem alert;
-  const _AlertCard({required this.alert});
-
-  static (IconData, Color) _style(BuildContext context, AlertType t) {
-    switch (t) {
-      case AlertType.bus:
-        return (Icons.directions_bus_rounded, context.colors.warning);
-      case AlertType.notice:
-        return (Icons.campaign_rounded, context.colors.primary);
-      case AlertType.exam:
-        return (Icons.edit_document, context.colors.accentCyan);
-      case AlertType.event:
-        return (Icons.celebration_rounded, context.colors.danger);
-      case AlertType.library:
-        return (Icons.local_library_rounded, context.colors.purple);
-      case AlertType.lostFound:
-        return (Icons.inventory_2_rounded, context.colors.success);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final (icon, color) = _style(context, alert.type);
-    return Semantics(
-      label: '${alert.type.name} alert. ${alert.title}. ${alert.subtitle}. ${alert.time}',
-      excludeSemantics: true,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: context.colors.surfaceAlt,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: context.colors.border),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(11),
-              ),
-              child: Icon(icon, color: color, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    alert.title,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14.5,
-                      color: context.colors.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    alert.subtitle,
-                    style: TextStyle(color: context.colors.textSecondary, fontSize: 12.5),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              alert.time,
-              style: TextStyle(color: context.colors.textMuted, fontSize: 11.5),
             ),
           ],
         ),

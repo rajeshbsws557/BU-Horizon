@@ -109,8 +109,7 @@ export function MfaForm({ adminName, nextPath }: MfaFormProps) {
       if (verifyError) throw verifyError;
 
       toast.success("Identity verified");
-      router.replace(nextPath);
-      router.refresh();
+      window.location.assign(nextPath);
     } catch (caught) {
       setCode("");
       setError(
@@ -126,8 +125,7 @@ export function MfaForm({ adminName, nextPath }: MfaFormProps) {
   async function handleSignOut() {
     const supabase = createBrowserClient();
     await supabase.auth.signOut();
-    router.replace("/login");
-    router.refresh();
+    window.location.assign("/login");
   }
 
   async function copySecret() {

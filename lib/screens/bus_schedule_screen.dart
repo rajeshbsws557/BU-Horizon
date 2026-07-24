@@ -4,9 +4,65 @@ import 'package:flutter/material.dart';
 import '../data/university_bus_schedule_data.dart';
 import '../di/di.dart';
 import '../repositories/bus_schedule_repository.dart';
+import '../services/bus_alarm_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/bus_alarm_picker_modal.dart';
+import '../widgets/bus_route_interactive_map.dart';
 import '../widgets/common.dart';
 import '../widgets/motion.dart';
+
+/// Canonical campus place name in the bundled + live timetable.
+const String _kCampusPlace = 'বিশ্ববিদ্যালয়';
+
+/// Robust campus check: tolerates surrounding whitespace / partial matches
+/// that can appear in live Supabase rows (a single stray char used to break
+/// the direction filter silently).
+bool _isCampusPlace(String place) {
+  final p = place.trim();
+  return p == _kCampusPlace || p.contains(_kCampusPlace);
+}
+
+/// Stable, unique id for a single trip. One formula shared by every "Set
+/// Alarm" entry point so the same physical trip never yields two ids.
+///
+/// Exposed via [busScheduleTripId] for tests that guard the "spotlight and
+/// list-row Set Alarm agree on the same id" invariant.
+String _tripId(String routeId, String place, String time) =>
+    busScheduleTripId(routeId, place, time);
+
+/// Public seam over the trip-id formula for regression tests. Do not call from
+/// UI code — use [_tripId] so the shared formula stays the single source.
+@visibleForTesting
+String busScheduleTripId(String routeId, String place, String time) =>
+    '${routeId}__${place.trim()}__${time.trim()}';
+
+enum _TimeBucket { morning, afternoon, evening }
+
+/// Single source of truth for time-of-day bucketing. Parses a real clock time
+/// ("8:30 AM", "12:10 PM") instead of matching string prefixes, so 10/11 AM no
+/// longer leak into the evening bucket and noon is consistently afternoon.
+/// Falls back to [_TimeBucket.morning] when a time can't be parsed.
+_TimeBucket _bucketForTime(String rawTime) {
+  final minutes = _minutesOfDay(rawTime);
+  if (minutes == null) return _TimeBucket.morning;
+  if (minutes < 12 * 60) return _TimeBucket.morning; // before 12:00 PM
+  if (minutes < 17 * 60) return _TimeBucket.afternoon; // 12:00 PM – 4:59 PM
+  return _TimeBucket.evening; // 5:00 PM +
+}
+
+/// Minutes since midnight for a "h:mm AM/PM" string, or null if unparseable.
+int? _minutesOfDay(String rawTime) {
+  final match =
+      RegExp(r'(\d{1,2}):(\d{2})\s*([AP]M)', caseSensitive: false)
+          .firstMatch(rawTime.trim());
+  if (match == null) return null;
+  var hour = int.parse(match.group(1)!);
+  final minute = int.parse(match.group(2)!);
+  final isPm = match.group(3)!.toUpperCase() == 'PM';
+  if (hour == 12) hour = 0; // 12 AM -> 0, 12 PM -> 0 (+12 below)
+  if (isPm) hour += 12;
+  return hour * 60 + minute;
+}
 
 class BusScheduleScreen extends StatelessWidget {
   const BusScheduleScreen({super.key});
@@ -29,6 +85,7 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
   // it as soon as the fetch completes (and on pull-to-refresh).
   List<UniversityBusCategory> _categories = UniversityBusScheduleData.categories;
   bool _syncing = false;
+  bool _showFilterHeader = true;
 
   int _selectedCategoryIndex = 0; // 0: Student, 1: Teacher, 2: Staff
   int _selectedRouteIndex = 0;
@@ -121,23 +178,13 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
 
     bool matchesTime = true;
     if (_selectedTimeFilter != 'All Times') {
-      final tUpper = tripTime.toUpperCase();
+      final bucket = _bucketForTime(tripTime);
       if (_selectedTimeFilter.startsWith('Morning')) {
-        matchesTime = tUpper.contains('AM') || tUpper.contains('12:00 PM');
+        matchesTime = bucket == _TimeBucket.morning;
       } else if (_selectedTimeFilter.startsWith('Afternoon')) {
-        matchesTime = tUpper.contains('PM') &&
-            (tUpper.startsWith('1:') ||
-                tUpper.startsWith('2:') ||
-                tUpper.startsWith('3:') ||
-                tUpper.startsWith('4:') ||
-                tUpper.startsWith('12:'));
+        matchesTime = bucket == _TimeBucket.afternoon;
       } else if (_selectedTimeFilter.startsWith('Evening')) {
-        matchesTime = tUpper.contains('PM') &&
-            (tUpper.startsWith('5:') ||
-                tUpper.startsWith('6:') ||
-                tUpper.startsWith('7:') ||
-                tUpper.startsWith('8:') ||
-                tUpper.startsWith('9:'));
+        matchesTime = bucket == _TimeBucket.evening;
       }
     }
 
@@ -183,36 +230,36 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
       ),
       body: Column(
         children: [
-          // 1. Category Switcher (Student / Teacher / Staff)
+          // 1. Permanently Anchored Category Switcher (Student / Teacher / Staff)
           Center(
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: List.generate(
-                _categories.length,
-                (index) {
-                  final cat = _categories[index];
-                  final isSelected = _selectedCategoryIndex == index;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: _CategoryButton(
-                      label: cat.title,
-                      isSelected: isSelected,
-                      onTap: () => _onSelectCategory(index),
-                    ),
-                  );
-                },
-              ),
+                  _categories.length,
+                  (index) {
+                    final cat = _categories[index];
+                    final isSelected = _selectedCategoryIndex == index;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: _CategoryButton(
+                        label: cat.title,
+                        isSelected: isSelected,
+                        onTap: () => _onSelectCategory(index),
+                      ),
+                    );
+                  },
+                ),
               ),
             ),
           ),
 
-          // 2. Route Selector (Route 01 / Route 02 / Route 03...)
+          // 2. Permanently Anchored Route Selector (Route 01 / Route 02 / Route 03...)
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
             child: Row(
               children: List.generate(
                 _currentCategory.routes.length,
@@ -221,7 +268,7 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
                   final isSelected = _selectedRouteIndex == index;
                   String destHint = '';
                   for (final sec in r.departureSections) {
-                    if (sec.departurePlace != 'বিশ্ববিদ্যালয়') {
+                    if (!_isCampusPlace(sec.departurePlace)) {
                       destHint = sec.departurePlace;
                       break;
                     }
@@ -244,113 +291,145 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
             ),
           ),
 
-          // 3. Direction Switcher & Quick Filters Bar
-          if (!_isFilterActive && route.departureSections.length > 1)
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
-              child: Row(
-                children: [
-                  _DirectionToggleChip(
-                    icon: Icons.swap_horiz_rounded,
-                    label: 'All Directions',
-                    isSelected: _selectedDirectionIndex == 0,
-                    onTap: () => setState(() => _selectedDirectionIndex = 0),
-                  ),
-                  const SizedBox(width: 8),
-                  _DirectionToggleChip(
-                    icon: Icons.north_east_rounded,
-                    label: 'From Campus',
-                    isSelected: _selectedDirectionIndex == 1,
-                    onTap: () => setState(() => _selectedDirectionIndex = 1),
-                  ),
-                  const SizedBox(width: 8),
-                  _DirectionToggleChip(
-                    icon: Icons.south_west_rounded,
-                    label: 'To Campus',
-                    isSelected: _selectedDirectionIndex == 2,
-                    onTap: () => setState(() => _selectedDirectionIndex = 2),
-                  ),
-                ],
-              ),
-            ),
+          // 3-4. Smooth Collapsible Extra Filters Bar (Collapses only when scrolling down deep)
+          AnimatedSize(
+            duration: const Duration(milliseconds: 320),
+            curve: Curves.fastOutSlowIn,
+            child: _showFilterHeader
+                ? AnimatedOpacity(
+                    duration: const Duration(milliseconds: 260),
+                    opacity: _showFilterHeader ? 1.0 : 0.0,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Direction Switcher
+                        if (!_isFilterActive && route.departureSections.length > 1)
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            padding: const EdgeInsets.fromLTRB(16, 2, 16, 6),
+                            child: Row(
+                              children: [
+                                _DirectionToggleChip(
+                                  icon: Icons.swap_horiz_rounded,
+                                  label: 'All Directions',
+                                  isSelected: _selectedDirectionIndex == 0,
+                                  onTap: () => setState(() => _selectedDirectionIndex = 0),
+                                ),
+                                const SizedBox(width: 8),
+                                _DirectionToggleChip(
+                                  icon: Icons.north_east_rounded,
+                                  label: 'From Campus',
+                                  isSelected: _selectedDirectionIndex == 1,
+                                  onTap: () => setState(() => _selectedDirectionIndex = 1),
+                                ),
+                                const SizedBox(width: 8),
+                                _DirectionToggleChip(
+                                  icon: Icons.south_west_rounded,
+                                  label: 'To Campus',
+                                  isSelected: _selectedDirectionIndex == 2,
+                                  onTap: () => setState(() => _selectedDirectionIndex = 2),
+                                ),
+                              ],
+                            ),
+                          ),
 
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-            child: Row(
-              children: [
-                Icon(Icons.filter_alt_rounded,
-                    size: 16, color: context.colors.primary),
-                const SizedBox(width: 6),
-                _FilterChipDropdown(
-                  icon: Icons.place_rounded,
-                  label: _selectedPlaceFilter == 'All Places'
-                      ? 'Where to go?'
-                      : 'Place: $_selectedPlaceFilter',
-                  isActive: _selectedPlaceFilter != 'All Places',
-                  onTap: () => _showPlacePicker(context),
-                ),
-                const SizedBox(width: 8),
-                _FilterChipDropdown(
-                  icon: Icons.access_time_rounded,
-                  label: _selectedTimeFilter == 'All Times'
-                      ? 'Time Filter'
-                      : _selectedTimeFilter,
-                  isActive: _selectedTimeFilter != 'All Times',
-                  onTap: () => _showTimePicker(context),
-                ),
-                if (_isFilterActive) ...[
-                  const SizedBox(width: 8),
-                  ActionChip(
-                    label: Text(
-                      'Clear Filter',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: context.colors.primary,
-                      ),
+                        // Quick Filter Chips (Place / Time)
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
+                          child: Row(
+                            children: [
+                              Icon(Icons.filter_alt_rounded,
+                                  size: 16, color: context.colors.primary),
+                              const SizedBox(width: 6),
+                              _FilterChipDropdown(
+                                icon: Icons.place_rounded,
+                                label: _selectedPlaceFilter == 'All Places'
+                                    ? 'Where to go?'
+                                    : 'Place: $_selectedPlaceFilter',
+                                isActive: _selectedPlaceFilter != 'All Places',
+                                onTap: () => _showPlacePicker(context),
+                              ),
+                              const SizedBox(width: 8),
+                              _FilterChipDropdown(
+                                icon: Icons.access_time_rounded,
+                                label: _selectedTimeFilter == 'All Times'
+                                    ? 'Time Filter'
+                                    : _selectedTimeFilter,
+                                isActive: _selectedTimeFilter != 'All Times',
+                                onTap: () => _showTimePicker(context),
+                              ),
+                              if (_isFilterActive) ...[
+                                const SizedBox(width: 8),
+                                ActionChip(
+                                  label: Text(
+                                    'Clear Filter',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: context.colors.primary,
+                                    ),
+                                  ),
+                                  avatar: Icon(Icons.close_rounded,
+                                      size: 14, color: context.colors.primary),
+                                  backgroundColor: context.colors.primary.withValues(alpha: 0.12),
+                                  side: BorderSide.none,
+                                  onPressed: () {
+                                    setState(() {
+                                      _selectedPlaceFilter = 'All Places';
+                                      _selectedTimeFilter = 'All Times';
+                                    });
+                                  },
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+
+                        // Interactive Google Map (when enabled or toggled)
+                        if (_showRouteTimeline)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                            child: BusRouteInteractiveMap(
+                              activeRouteId: route.id,
+                              onClose: () => setState(() => _showRouteTimeline = false),
+                            ),
+                          ),
+                      ],
                     ),
-                    avatar: Icon(Icons.close_rounded,
-                        size: 14, color: context.colors.primary),
-                    backgroundColor: context.colors.primary.withValues(alpha: 0.12),
-                    side: BorderSide.none,
-                    onPressed: () {
-                      setState(() {
-                        _selectedPlaceFilter = 'All Places';
-                        _selectedTimeFilter = 'All Times';
-                      });
-                    },
-                  ),
-                ],
-              ],
-            ),
+                  )
+                : const SizedBox.shrink(),
           ),
-
-          // 4. Interactive Route Timeline Map (when enabled or toggled)
-          if (_showRouteTimeline &&
-              route.routeDescription != null &&
-              route.routeDescription!.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: _RouteStopTimelineCard(
-                routeName: route.routeName,
-                description: route.routeDescription!,
-                onClose: () => setState(() => _showRouteTimeline = false),
-              ),
-            ),
 
           const Divider(height: 1),
 
-          // 5. Main Scrollable Content (Live Spotlight Hero + Grouped Schedule / Filtered Results)
+          // 5. Main Scrollable Content (Live Spotlight Hero + Grouped Schedule)
           Expanded(
-            child: RefreshIndicator(
-              color: context.colors.primary,
-              backgroundColor: context.colors.surfaceAlt,
-              onRefresh: _load,
-              child: _isFilterActive
-                  ? _buildFilteredResultsView(isDark)
-                  : _buildRegularScheduleView(route, isDark),
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (scrollInfo) {
+                if (scrollInfo.metrics.axis == Axis.vertical) {
+                  // Only collapse extra filters when user scrolls down past 120px
+                  if (scrollInfo.metrics.extentBefore > 120) {
+                    if (_showFilterHeader) {
+                      setState(() => _showFilterHeader = false);
+                    }
+                  } else if (scrollInfo.metrics.extentBefore < 30) {
+                    // Restore when user scrolls back near the top (<30px)
+                    if (!_showFilterHeader) {
+                      setState(() => _showFilterHeader = true);
+                    }
+                  }
+                }
+                return false;
+              },
+              child: RefreshIndicator(
+                color: context.colors.primary,
+                backgroundColor: context.colors.surfaceAlt,
+                onRefresh: _load,
+                child: _isFilterActive
+                    ? _buildFilteredResultsView(isDark)
+                    : _buildRegularScheduleView(route, isDark),
+              ),
             ),
           ),
         ],
@@ -359,21 +438,22 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
   }
 
   Widget _buildFilteredResultsView(bool isDark) {
+    // Scope the filter to the category the user is currently viewing so a
+    // Student browsing Route 02 doesn't get Teacher/Staff trips mixed in.
+    final cat = _currentCategory;
     final results = <Map<String, String>>[];
-    for (final cat in _categories) {
-      for (final r in cat.routes) {
-        for (final sec in r.departureSections) {
-          for (final trip in sec.trips) {
-            if (_matchesFilter(trip.time, sec.departurePlace)) {
-              results.add({
-                'category': cat.title,
-                'route': r.routeName,
-                'place': sec.departurePlace,
-                'time': trip.time,
-                'bus': trip.busName,
-                'desc': r.routeDescription ?? '',
-              });
-            }
+    for (final r in cat.routes) {
+      for (final sec in r.departureSections) {
+        for (final trip in sec.trips) {
+          if (_matchesFilter(trip.time, sec.departurePlace)) {
+            results.add({
+              'category': cat.title,
+              'route': r.routeName,
+              'place': sec.departurePlace,
+              'time': trip.time,
+              'bus': trip.busName,
+              'desc': r.routeDescription ?? '',
+            });
           }
         }
       }
@@ -404,7 +484,7 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Showing ${results.length} available buses matching your filter',
+                          'Showing ${results.length} ${cat.title} buses matching your filter',
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -551,12 +631,12 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
     List<DepartureSection> sectionsToShow = [];
     if (_selectedDirectionIndex == 1) {
       sectionsToShow = route.departureSections
-          .where((s) => s.departurePlace == 'বিশ্ববিদ্যালয়')
+          .where((s) => _isCampusPlace(s.departurePlace))
           .toList();
       if (sectionsToShow.isEmpty) sectionsToShow = route.departureSections;
     } else if (_selectedDirectionIndex == 2) {
       sectionsToShow = route.departureSections
-          .where((s) => s.departurePlace != 'বিশ্ববিদ্যালয়')
+          .where((s) => !_isCampusPlace(s.departurePlace))
           .toList();
       if (sectionsToShow.isEmpty) sectionsToShow = route.departureSections;
     } else {
@@ -587,6 +667,8 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
                     child: Padding(
                       padding: const EdgeInsets.only(bottom: 16),
                       child: _DepartureSectionCard(
+                        routeId: route.id,
+                        routeName: route.routeName,
                         section: sectionsToShow[i],
                       ),
                     ),
@@ -650,7 +732,37 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
                       ),
                     ),
                   ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
+                Entrance(
+                  key: ValueKey('${route.id}_bottom_google_map'),
+                  index: sectionsToShow.length + 2,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10, left: 4),
+                        child: Row(
+                          children: [
+                            Icon(Icons.map_rounded, color: context.colors.primary, size: 18),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Interactive Route Map (Barishal City)',
+                              style: TextStyle(
+                                fontSize: 15.5,
+                                fontWeight: FontWeight.w800,
+                                color: context.colors.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      BusRouteInteractiveMap(
+                        activeRouteId: route.id,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
                 Center(
                   child: Text(
                     'BU Horizon · Developed by Rajesh Biswas (rajeshbiswas.dev)',
@@ -855,8 +967,26 @@ class _LiveNextBusSpotlightCard extends StatelessWidget {
                 ),
               ),
               Pressable(
-                onTap: () => showToast(
-                    context, 'Reminder scheduled for ${trip.time} bus'),
+                onTap: () {
+                  final tripId = _tripId(route.id, sec.departurePlace, trip.time);
+                  showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (ctx) => BusAlarmPickerModal(
+                      tripId: tripId,
+                      routeName: route.routeName,
+                      departurePlace: sec.departurePlace,
+                      tripTime: trip.time,
+                      busName: trip.busName,
+                    ),
+                  ).then((result) {
+                    if (!context.mounted) return;
+                    if (result is ScheduledBusAlarmInfo) {
+                      showToast(context, 'Alarm set for ${result.tripTime} (${result.leadMinutes} mins before)');
+                    }
+                  });
+                },
                 child: Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -890,127 +1020,6 @@ class _LiveNextBusSpotlightCard extends StatelessWidget {
                 ),
               ),
             ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RouteStopTimelineCard extends StatelessWidget {
-  final String routeName;
-  final String description;
-  final VoidCallback onClose;
-
-  const _RouteStopTimelineCard({
-    required this.routeName,
-    required this.description,
-    required this.onClose,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final stops = description
-        .split(RegExp(r'\s*[-–—]\s*'))
-        .where((s) => s.trim().isNotEmpty)
-        .toList();
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: context.colors.surfaceAlt,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: context.colors.primary.withValues(alpha: 0.35)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.route_rounded,
-                  size: 18, color: context.colors.primary),
-              const SizedBox(width: 8),
-              Text(
-                'Interactive Route Path ($routeName)',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15,
-                  color: context.colors.primary,
-                ),
-              ),
-              const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.close_rounded, size: 18),
-                visualDensity: VisualDensity.compact,
-                onPressed: onClose,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: List.generate(stops.length, (i) {
-                final isFirst = i == 0;
-                final isLast = i == stops.length - 1;
-                final stop = stops[i].trim();
-
-                return Row(
-                  children: [
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(3),
-                          decoration: BoxDecoration(
-                            color: isFirst || isLast
-                                ? context.colors.primary
-                                : context.colors.surface,
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: context.colors.primary,
-                              width: 2,
-                            ),
-                          ),
-                          child: Icon(
-                            isFirst
-                                ? Icons.flight_takeoff_rounded
-                                : isLast
-                                    ? Icons.flag_rounded
-                                    : Icons.circle,
-                            size: isFirst || isLast ? 13 : 8,
-                            color: isFirst || isLast
-                                ? Colors.white
-                                : context.colors.primary,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          stop,
-                          style: TextStyle(
-                            fontWeight: isFirst || isLast
-                                ? FontWeight.w700
-                                : FontWeight.w600,
-                            fontSize: 12.5,
-                            color: isFirst || isLast
-                                ? context.colors.primary
-                                : context.colors.textPrimary,
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (!isLast)
-                      Container(
-                        width: 32,
-                        height: 2.5,
-                        color: context.colors.primary.withValues(alpha: 0.4),
-                        margin:
-                            const EdgeInsets.only(bottom: 22, left: 4, right: 4),
-                      ),
-                  ],
-                );
-              }),
-            ),
           ),
         ],
       ),
@@ -1062,6 +1071,8 @@ class _DirectionToggleChip extends StatelessWidget {
                 const SizedBox(width: 5),
                 Text(
                   label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
@@ -1223,7 +1234,8 @@ class _RouteButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 220),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+          clipBehavior: Clip.antiAlias,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
           decoration: BoxDecoration(
             color: isSelected ? context.colors.primary : context.colors.surfaceAlt,
             borderRadius: BorderRadius.circular(12),
@@ -1245,6 +1257,7 @@ class _RouteButton extends StatelessWidget {
               if (destinationHint.isNotEmpty) ...[
                 const SizedBox(width: 6),
                 Container(
+                  constraints: const BoxConstraints(maxWidth: 130),
                   padding:
                       const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
@@ -1255,6 +1268,8 @@ class _RouteButton extends StatelessWidget {
                   ),
                   child: Text(
                     destinationHint,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: isSelected ? Colors.white : context.colors.primary,
                       fontSize: 11,
@@ -1329,9 +1344,15 @@ class _BusNamePillTags extends StatelessWidget {
 }
 
 class _DepartureSectionCard extends StatelessWidget {
+  final String routeId;
+  final String routeName;
   final DepartureSection section;
 
-  const _DepartureSectionCard({required this.section});
+  const _DepartureSectionCard({
+    required this.routeId,
+    required this.routeName,
+    required this.section,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1342,18 +1363,13 @@ class _DepartureSectionCard extends StatelessWidget {
     final eveningTrips = <BusTripItem>[];
 
     for (final trip in section.trips) {
-      final t = trip.time.toUpperCase();
-      if (t.contains('AM') || (t.contains('12:') && !t.contains('PM'))) {
-        morningTrips.add(trip);
-      } else if (t.contains('PM') &&
-          (t.startsWith('1:') ||
-              t.startsWith('2:') ||
-              t.startsWith('3:') ||
-              t.startsWith('4:') ||
-              t.startsWith('12:'))) {
-        afternoonTrips.add(trip);
-      } else {
-        eveningTrips.add(trip);
+      switch (_bucketForTime(trip.time)) {
+        case _TimeBucket.morning:
+          morningTrips.add(trip);
+        case _TimeBucket.afternoon:
+          afternoonTrips.add(trip);
+        case _TimeBucket.evening:
+          eveningTrips.add(trip);
       }
     }
 
@@ -1441,6 +1457,9 @@ class _DepartureSectionCard extends StatelessWidget {
               title: 'Morning Trips (সকাল)',
               icon: Icons.wb_sunny_rounded,
               iconColor: context.colors.warning,
+              routeId: routeId,
+              routeName: routeName,
+              departurePlace: section.departurePlace,
               trips: morningTrips,
             ),
           if (afternoonTrips.isNotEmpty)
@@ -1448,6 +1467,9 @@ class _DepartureSectionCard extends StatelessWidget {
               title: 'Afternoon Trips (দুপুর)',
               icon: Icons.light_mode_rounded,
               iconColor: context.colors.accentCyan,
+              routeId: routeId,
+              routeName: routeName,
+              departurePlace: section.departurePlace,
               trips: afternoonTrips,
             ),
           if (eveningTrips.isNotEmpty)
@@ -1455,6 +1477,9 @@ class _DepartureSectionCard extends StatelessWidget {
               title: 'Evening & Night Trips (রাত)',
               icon: Icons.nights_stay_rounded,
               iconColor: context.colors.purple,
+              routeId: routeId,
+              routeName: routeName,
+              departurePlace: section.departurePlace,
               trips: eveningTrips,
             ),
         ],
@@ -1467,12 +1492,18 @@ class _TripGroupSection extends StatelessWidget {
   final String title;
   final IconData icon;
   final Color iconColor;
+  final String routeId;
+  final String routeName;
+  final String departurePlace;
   final List<BusTripItem> trips;
 
   const _TripGroupSection({
     required this.title,
     required this.icon,
     required this.iconColor,
+    required this.routeId,
+    required this.routeName,
+    required this.departurePlace,
     required this.trips,
   });
 
@@ -1537,11 +1568,29 @@ class _TripGroupSection extends StatelessWidget {
                         ),
                         IconButton(
                           icon: const Icon(Icons.alarm_add_rounded, size: 20),
-                          color: context.colors.textSecondary,
+                          color: context.colors.primary,
                           tooltip: 'Set Alarm for ${trip.time}',
                           onPressed: () {
-                            showToast(context,
-                                'Alarm reminder scheduled for ${trip.time}');
+                            final tripId = _tripId(routeId, departurePlace, trip.time);
+                            showModalBottomSheet(
+                              context: context,
+                              isScrollControlled: true,
+                              backgroundColor: Colors.transparent,
+                              builder: (ctx) => BusAlarmPickerModal(
+                                tripId: tripId,
+                                routeName: routeName,
+                                departurePlace: departurePlace,
+                                tripTime: trip.time,
+                                busName: trip.busName,
+                              ),
+                            ).then((result) {
+                              if (!context.mounted) return;
+                              if (result is ScheduledBusAlarmInfo) {
+                                showToast(context, 'Alarm set for ${result.tripTime} (${result.leadMinutes} mins before)');
+                              } else if (result == false) {
+                                showToast(context, 'Alarm cancelled');
+                              }
+                            });
                           },
                         ),
                       ],

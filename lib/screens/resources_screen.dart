@@ -232,7 +232,7 @@ class _CourseResourcesScreenState extends State<_CourseResourcesScreen> {
   }
 
   Future<void> _addResource() async {
-    final input = await _showResourceEditor(context);
+    final input = await showResourceEditorSheet(context);
     if (input == null || !mounted) return;
     await _runMutation(
       () => _repository.createResource(
@@ -248,7 +248,7 @@ class _CourseResourcesScreenState extends State<_CourseResourcesScreen> {
   }
 
   Future<void> _editResource(ResourceItem resource) async {
-    final input = await _showResourceEditor(context, resource: resource);
+    final input = await showResourceEditorSheet(context, resource: resource);
     if (input == null || !mounted) return;
     await _runMutation(
       () => _repository.updateResource(
@@ -393,7 +393,7 @@ class _CourseResourcesScreenState extends State<_CourseResourcesScreen> {
                       final resource = _resources[index - 1];
                       return Entrance(
                         index: index - 1,
-                        child: _ResourceCard(
+                        child: ResourceCard(
                           resource: resource,
                           canManage: canManage,
                           onOpen: () => _open(resource),
@@ -473,14 +473,15 @@ class _CourseHeader extends StatelessWidget {
   }
 }
 
-class _ResourceCard extends StatelessWidget {
+class ResourceCard extends StatelessWidget {
   final ResourceItem resource;
   final bool canManage;
   final VoidCallback onOpen;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
-  const _ResourceCard({
+  const ResourceCard({
+    super.key,
     required this.resource,
     required this.canManage,
     required this.onOpen,
@@ -681,7 +682,7 @@ class _ResourceSkeletonList extends StatelessWidget {
   }
 }
 
-typedef _ResourceInput = ({
+typedef ResourceInput = ({
   String title,
   String description,
   ResourceKind kind,
@@ -700,11 +701,11 @@ String _formatFileSize(int bytes) {
   return '${mib.toStringAsFixed(mib < 10 ? 1 : 0)} MB';
 }
 
-Future<_ResourceInput?> _showResourceEditor(
+Future<ResourceInput?> showResourceEditorSheet(
   BuildContext context, {
   ResourceItem? resource,
 }) {
-  return showModalBottomSheet<_ResourceInput>(
+  return showModalBottomSheet<ResourceInput>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,

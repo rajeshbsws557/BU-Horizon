@@ -49,16 +49,19 @@ class _BloodHelpViewState extends State<_BloodHelpView> {
   }
 
   Future<void> _openRequestDetail(BloodRequest request) async {
-    final responded = await showModalBottomSheet<bool>(
+    final result = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _RequestDetailSheet(request: request),
     );
-    if (responded == true && mounted) {
+    if (!mounted || result == null) return;
+    if (result == 'fulfilled') {
+      showToast(context, 'Request marked as fulfilled — thank you!');
+    } else if (result == 'responded') {
       showToast(context, 'Response sent — the requester can now see your contact');
-      await _refresh();
     }
+    await _refresh();
   }
 
   @override
@@ -434,11 +437,57 @@ class _RequestDetailSheetState extends State<_RequestDetailSheet> {
         message: _message.text.trim(),
         contact: _contact.text.trim(),
       );
-      if (mounted) Navigator.of(context).pop(true);
+      if (mounted) Navigator.of(context).pop('responded');
     } catch (_) {
       if (mounted) {
         setState(() => _saving = false);
         showToast(context, 'Could not send the response. Try again.');
+      }
+    }
+  }
+
+  Future<void> _markFulfilled() async {
+    if (_saving) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: dialogContext.colors.surface,
+        title: Text(
+          'Mark as fulfilled?',
+          style: TextStyle(color: dialogContext.colors.textPrimary),
+        ),
+        content: Text(
+          'Confirm that you have received the blood you needed. This closes '
+          'the request and removes it from the open list.',
+          style: TextStyle(color: dialogContext.colors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Not yet'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(
+              'Blood received',
+              style: TextStyle(
+                color: dialogContext.colors.success,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _saving = true);
+    try {
+      await getIt<BloodRepository>().markFulfilled(widget.request.id);
+      if (mounted) Navigator.of(context).pop('fulfilled');
+    } catch (_) {
+      if (mounted) {
+        setState(() => _saving = false);
+        showToast(context, 'Could not update the request. Try again.');
       }
     }
   }
@@ -510,9 +559,23 @@ class _RequestDetailSheetState extends State<_RequestDetailSheet> {
                   ),
                 ],
                 const SizedBox(height: AppSpacing.lg),
-                if (request.isMine)
-                  _ResponsesList(requestId: request.id)
-                else if (request.responded)
+                if (request.isMine) ...[
+                  _ResponsesList(requestId: request.id),
+                  const SizedBox(height: AppSpacing.lg),
+                  PrimaryButton(
+                    label: _saving ? 'Updating…' : 'Mark as Fulfilled',
+                    icon: Icons.check_circle_rounded,
+                    onPressed: _markFulfilled,
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    'Tap once you have received blood — this closes your request.',
+                    style: TextStyle(
+                      color: context.colors.textMuted,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ] else if (request.responded)
                   Row(
                     children: [
                       Icon(Icons.check_circle_rounded,

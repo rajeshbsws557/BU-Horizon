@@ -19,6 +19,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 
+import { useBodyScrollLock } from "@/hooks/use-body-scroll-lock";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -53,6 +54,8 @@ export function AdminShell({ children, admin }: AdminShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
+
+  useBodyScrollLock(sidebarOpen);
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {

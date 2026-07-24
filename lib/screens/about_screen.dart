@@ -17,75 +17,83 @@ class AboutScreen extends StatelessWidget {
     ];
     return Scaffold(
       appBar: AppBar(title: const Text('BU Horizon')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          const SizedBox(height: 10),
-          const Center(child: HorizonLogo(size: 96)),
-          const SizedBox(height: 16),
-          Center(
-            child: Text(
-              'BU Horizon',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.5,
-                color: context.colors.textPrimary,
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Center(
-            child: Text(
-              'Version 1.0.0',
-              style: TextStyle(color: context.colors.textSecondary, fontSize: 13),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+      body: ResponsivePage(
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            const SizedBox(height: 10),
+            const Center(child: HorizonLogo(size: 96)),
+            const SizedBox(height: 16),
+            Center(
               child: Text(
-                'BU Horizon is your all-in-one campus companion.\nStay informed, connected and ahead.',
-                textAlign: TextAlign.center,
+                'BU Horizon',
                 style: TextStyle(
-                  color: context.colors.textSecondary,
-                  fontSize: 13,
-                  height: 1.5,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.5,
+                  color: context.colors.textPrimary,
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: 28),
-          ...links.map(
-            (l) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _LinkTile(
-                icon: l[0] as IconData,
-                label: l[1] as String,
-                onTap: () => showToast(context, '${l[1]} coming soon'),
+            const SizedBox(height: 6),
+            Center(
+              child: Text(
+                'Version 1.0.0',
+                style: TextStyle(
+                  color: context.colors.textSecondary,
+                  fontSize: 13,
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 24),
-          Center(
-            child: Text(
-              '© ${DateTime.now().year} BU Horizon. All rights reserved.',
-              style: TextStyle(color: context.colors.textMuted, fontSize: 11.5),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Center(
-            child: Text(
-              'Developer: Rajesh Biswas (rajeshbiswas.dev)',
-              style: TextStyle(
-                color: context.colors.textMuted,
-                fontSize: 11,
-                fontStyle: FontStyle.italic,
+            const SizedBox(height: 16),
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  'BU Horizon is your all-in-one campus companion.\nStay informed, connected and ahead.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: context.colors.textSecondary,
+                    fontSize: 13,
+                    height: 1.5,
+                  ),
+                ),
               ),
             ),
-          ),
-        ],
+            const SizedBox(height: 28),
+            ...links.map(
+              (l) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _LinkTile(
+                  icon: l[0] as IconData,
+                  label: l[1] as String,
+                  onTap: () => showToast(context, '${l[1]} coming soon'),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Center(
+              child: Text(
+                '© ${DateTime.now().year} BU Horizon. All rights reserved.',
+                style: TextStyle(
+                  color: context.colors.textMuted,
+                  fontSize: 11.5,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Center(
+              child: Text(
+                'Developer: Rajesh Biswas (rajeshbiswas.dev)',
+                style: TextStyle(
+                  color: context.colors.textMuted,
+                  fontSize: 11,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../data/local_store.dart';
+import '../di/di.dart';
 import 'auth_service.dart';
 import 'supabase_config.dart';
 
@@ -18,6 +20,8 @@ class CurrentProfile {
   final String? studentId;
   final String? departmentName;
   final String? batchId;
+  final int? currentTerm;
+  final String? batchStatus;
   final String role;
 
   const CurrentProfile({
@@ -28,6 +32,8 @@ class CurrentProfile {
     this.studentId,
     this.departmentName,
     this.batchId,
+    this.currentTerm,
+    this.batchStatus,
   });
 
   String get initials {
@@ -134,6 +140,7 @@ class SessionController extends ChangeNotifier {
       }
 
       final dept = row?['departments'] as Map<String, dynamic>?;
+      final batch = row?['batches'] as Map<String, dynamic>?;
       _profile = row == null
           ? null
           : CurrentProfile(
@@ -143,6 +150,8 @@ class SessionController extends ChangeNotifier {
               studentId: row['student_id'] as String?,
               role: (row['role'] as String?) ?? 'student',
               batchId: row['batch_id'] as String?,
+              currentTerm: batch?['current_term'] as int?,
+              batchStatus: batch?['status'] as String?,
               departmentName: dept?['name'] as String?,
             );
       notifyListeners();
@@ -169,7 +178,7 @@ class SessionController extends ChangeNotifier {
     return Supabase.instance.client
         .from('profiles')
         .select(
-          'id, full_name, email, student_id, role, batch_id, departments(name)',
+          'id, full_name, email, student_id, role, batch_id, departments(name), batches(current_term, status)',
         )
         .eq('id', userId)
         .maybeSingle();
@@ -212,6 +221,11 @@ class SessionController extends ChangeNotifier {
   Future<void> signOut() async {
     await _auth.signOut();
     _clearProfile();
+    // Drop cached backend reads so the next account on this device never sees
+    // the previous user's offline data. Settings (theme) are preserved.
+    if (getIt.isRegistered<LocalStore>()) {
+      unawaited(getIt<LocalStore>().clearCache());
+    }
   }
 
   @override

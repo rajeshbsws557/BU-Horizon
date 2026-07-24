@@ -45,6 +45,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   String? _facultyId;
   String? _departmentId;
   bool _loadingRefs = true;
+  bool _fetchingRefs = false;
   String? _refError;
 
   @override
@@ -66,6 +67,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Future<void> _loadReferenceData() async {
+    if (_fetchingRefs) return;
+    _fetchingRefs = true;
     setState(() {
       _loadingRefs = true;
       _refError = null;
@@ -93,6 +96,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _loadingRefs = false;
         _refError = e.toString();
       });
+    } finally {
+      _fetchingRefs = false;
     }
   }
 
@@ -135,8 +140,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       // With email confirmation enabled there is no active session yet.
       if (response.session == null) {
-        showToast(context,
-            'Account created. Check your email to confirm, then sign in.');
+        showToast(
+          context,
+          'Account created. Check your email to confirm, then sign in.',
+        );
         context.go(AppRoutes.login);
       } else {
         await getIt<SessionController>().refresh();
@@ -147,7 +154,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
     } on AuthFailure catch (e) {
       if (mounted) showToast(context, e.message);
     } catch (e) {
-      if (mounted) showToast(context, 'Registration failed. $e');
+      if (mounted)
+        showToast(context, 'Registration failed. Please try again later.');
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -168,6 +176,26 @@ class _RegisterScreenState extends State<RegisterScreen> {
     // Reference data is required for the Faculty/Department dropdowns — show a
     // clear retry state instead of a form that cannot be completed.
     if (_refError != null) {
+      final isNetwork =
+          _refError!.toLowerCase().contains('socket') ||
+          _refError!.toLowerCase().contains('timeout') ||
+          _refError!.toLowerCase().contains('connection') ||
+          _refError!.toLowerCase().contains('network') ||
+          _refError!.toLowerCase().contains('clientexception');
+      final isEmpty = _refError == 'empty';
+
+      final icon = isEmpty
+          ? Icons.storage_rounded
+          : (isNetwork ? Icons.wifi_off_rounded : Icons.error_outline_rounded);
+      final title = isEmpty
+          ? 'No Faculties Available'
+          : (isNetwork ? 'Connection Problem' : 'Could Not Load Departments');
+      final message = isEmpty
+          ? 'University reference data has not been set up yet. Please check back later.'
+          : (isNetwork
+                ? 'Could not connect to the campus server. Check your internet connection and try again.'
+                : 'An unexpected error occurred while loading university departments. Please try again or contact support.');
+
       return Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(32),
@@ -181,12 +209,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   color: context.colors.danger.withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(Icons.wifi_off_rounded,
-                    color: context.colors.danger, size: 34),
+                child: Icon(icon, color: context.colors.danger, size: 34),
               ),
               const SizedBox(height: 18),
               Text(
-                'Could not load faculties & departments',
+                title,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontWeight: FontWeight.w700,
@@ -196,8 +223,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Registration needs the university\'s faculty and department '
-                'list. Check your internet connection and try again.',
+                message,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: context.colors.textSecondary,
@@ -209,66 +235,87 @@ class _RegisterScreenState extends State<RegisterScreen> {
               PrimaryButton(
                 label: 'Try Again',
                 icon: Icons.refresh_rounded,
-                onPressed: _loadReferenceData,
+                onPressed: _fetchingRefs ? null : _loadReferenceData,
               ),
             ],
           ),
         ),
       );
     }
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Center(child: HorizonLogo(size: 80)),
-            const SizedBox(height: 24),
-            Text('Create Account',
-                style: TextStyle(
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 440),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Center(child: HorizonLogo(size: 80)),
+                const SizedBox(height: 24),
+                Text(
+                  'Create Account',
+                  style: TextStyle(
                     fontSize: 28,
                     fontWeight: FontWeight.w800,
-                    color: context.colors.textPrimary)),
-            const SizedBox(height: 8),
-            Text('Join the BU Horizon campus network.',
-                style: TextStyle(fontSize: 14, color: context.colors.textSecondary)),
-            const SizedBox(height: 24),
-            ..._buildFields(context),
-            const SizedBox(height: 28),
-            PrimaryButton(
-              label: _submitting ? 'Creating account...' : 'Sign Up',
-              icon: Icons.person_add_alt_1_rounded,
-              onPressed: _submitting ? () {} : _register,
-            ),
-            const SizedBox(height: 18),
-            Center(
-              child: TextButton(
-                onPressed: () => context.pop(),
-                child: RichText(
-                  text: TextSpan(
-                    text: 'Already have an account? ',
-                    style: TextStyle(color: context.colors.textSecondary, fontSize: 14),
-                    children: [
-                      TextSpan(
-                        text: 'Sign In',
-                        style: TextStyle(
-                            color: context.colors.primary, fontWeight: FontWeight.w700),
-                      ),
-                    ],
+                    color: context.colors.textPrimary,
                   ),
                 ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Center(
-              child: Text('Developer: Rajesh Biswas (rajeshbiswas.dev)',
+                const SizedBox(height: 8),
+                Text(
+                  'Join the BU Horizon campus network.',
                   style: TextStyle(
+                    fontSize: 14,
+                    color: context.colors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                ..._buildFields(context),
+                const SizedBox(height: 28),
+                PrimaryButton(
+                  label: _submitting ? 'Creating account...' : 'Sign Up',
+                  icon: Icons.person_add_alt_1_rounded,
+                  onPressed: _submitting ? null : _register,
+                ),
+                const SizedBox(height: 18),
+                Center(
+                  child: TextButton(
+                    onPressed: () => context.pop(),
+                    child: RichText(
+                      text: TextSpan(
+                        text: 'Already have an account? ',
+                        style: TextStyle(
+                          color: context.colors.textSecondary,
+                          fontSize: 14,
+                        ),
+                        children: [
+                          TextSpan(
+                            text: 'Sign In',
+                            style: TextStyle(
+                              color: context.colors.primary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Center(
+                  child: Text(
+                    'Developer: Rajesh Biswas (rajeshbiswas.dev)',
+                    style: TextStyle(
                       color: context.colors.textMuted,
                       fontSize: 11,
-                      fontStyle: FontStyle.italic)),
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -306,13 +353,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Widget _label(BuildContext context, String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 8, top: 16),
-        child: Text(text,
-            style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: context.colors.textSecondary)),
-      );
+    padding: const EdgeInsets.only(bottom: 8, top: 16),
+    child: Text(
+      text,
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: context.colors.textSecondary,
+      ),
+    ),
+  );
 
   List<Widget> _buildFields(BuildContext context) {
     final textStyle = TextStyle(color: context.colors.textPrimary);
@@ -367,8 +417,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
         textInputAction: TextInputAction.next,
         style: textStyle,
         decoration: _dec(context, 'e.g., 01712-345678'),
-        validator: (v) =>
-            (v == null || v.trim().isEmpty) ? 'Enter your phone number' : null,
+        validator: (v) {
+          final value = (v ?? '').trim();
+          if (value.isEmpty) return 'Enter your phone number';
+          if (!RegExp(r'^[0-9+\-\s()]{6,20}$').hasMatch(value)) {
+            return 'Enter a valid phone number';
+          }
+          return null;
+        },
       ),
       _label(context, 'Session'),
       TextFormField(
@@ -411,7 +467,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         dropdownColor: context.colors.surface,
         decoration: _dec(
           context,
-          _facultyId == null ? 'Select a faculty first' : 'Select your department',
+          _facultyId == null
+              ? 'Select a faculty first'
+              : 'Select your department',
         ),
         items: _departmentsForFaculty
             .map((d) => DropdownMenuItem(value: d.id, child: Text(d.name)))
@@ -429,7 +487,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         style: textStyle,
         decoration: _dec(
           context,
-          'Min. 6 characters',
+          'Min. 8 characters',
           suffix: IconButton(
             icon: Icon(
               _obscurePassword
@@ -437,11 +495,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   : Icons.visibility_outlined,
               color: context.colors.textSecondary,
             ),
-            onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+            onPressed: () =>
+                setState(() => _obscurePassword = !_obscurePassword),
           ),
         ),
-        validator: (v) =>
-            (v == null || v.length < 6) ? 'Password must be at least 6 characters' : null,
+        validator: (v) => (v == null || v.length < 8)
+            ? 'Password must be at least 8 characters'
+            : null,
       ),
     ];
   }

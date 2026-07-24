@@ -1,6 +1,7 @@
 // Developed by Rajesh Biswas (rajeshbiswas.dev)
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../di/di.dart';
 import '../navigation/app_router.dart';
@@ -44,6 +45,48 @@ class _LoggedInView extends StatelessWidget {
         profile!.studentId,
       if (profile?.email.isNotEmpty == true) profile!.email,
     ].join('  ·  ');
+    final isCr = profile?.role.toLowerCase() == 'cr';
+    
+    Future<void> advanceBatch(BuildContext context) async {
+      final term = profile?.currentTerm ?? 1;
+      final status = profile?.batchStatus;
+      if (status == 'graduated') {
+        showToast(context, 'This batch has already graduated.');
+        return;
+      }
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Advance Batch?'),
+          content: Text(
+            'Are you sure you want to advance your batch to Semester ${term + 1}? '
+            'This will affect all students in the batch.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Advance', style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true || !context.mounted) return;
+
+      try {
+        await Supabase.instance.client.rpc('advance_batch', params: {'target_batch': profile?.batchId});
+        if (!context.mounted) return;
+        showToast(context, 'Batch advanced successfully!');
+        await getIt<SessionController>().refresh();
+      } catch (_) {
+        if (context.mounted) showToast(context, 'Could not advance batch');
+      }
+    }
+    
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       children: [
@@ -141,6 +184,15 @@ class _LoggedInView extends StatelessWidget {
           label: 'About',
           onTap: () => context.push(AppRoutes.about),
         ),
+        if (isCr) ...[
+          const SizedBox(height: 8),
+          _Tile(
+            icon: Icons.upgrade_rounded,
+            label: 'Advance Batch Semester',
+            onTap: () => advanceBatch(context),
+            danger: true,
+          ),
+        ],
         const SizedBox(height: 8),
         _Tile(
           icon: Icons.logout_rounded,

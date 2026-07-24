@@ -22,10 +22,8 @@ class MainScaffold extends StatelessWidget {
       _openHub(context);
       return;
     }
-    // Raw bottom-nav slots: 0 Home, 1 Search, 2 Hub, 3 Alerts, 4 Profile.
-    // Shell branches: 0 Home, 1 Search, 2 Alerts, 3 About, 4 Profile.
-    // Only People Search is members-only among the bottom-nav destinations.
-    if (raw == 1 && !requireSignIn(context, 'People Search')) return;
+    // Raw bottom-nav slots: 0 Home, 1 Club, 2 Hub, 3 Alerts, 4 Profile.
+    // Shell branches: 0 Home, 1 Club, 2 Alerts, 3 About, 4 Profile.
     final branch = raw == 0
         ? 0
         : raw == 1
@@ -173,19 +171,15 @@ class MainScaffold extends StatelessWidget {
             ),
             _webNavButton(
               context: context,
-              label: 'People Search',
-              icon: Icons.search_rounded,
+              label: 'Club',
+              icon: Icons.groups_rounded,
               isSelected: navigationShell.currentIndex == 1,
-              onTap: () {
-                if (requireSignIn(context, 'People Search')) {
-                  navigationShell.goBranch(1);
-                }
-              },
+              onTap: () => navigationShell.goBranch(1),
             ),
             _webNavButton(
               context: context,
-              label: 'Alerts',
-              icon: Icons.notifications_rounded,
+              label: 'Public Notices',
+              icon: Icons.campaign_rounded,
               isSelected: navigationShell.currentIndex == 2,
               onTap: () => navigationShell.goBranch(2),
             ),
@@ -270,7 +264,7 @@ class MainScaffold extends StatelessWidget {
     switch (shellIndex) {
       case 0: // Home
         return 0;
-      case 1: // Search
+      case 1: // Club
         return 1;
       case 2: // Alerts
         return 3;

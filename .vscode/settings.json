@@ -1,3 +1,4 @@
 {
-    "cmake.sourceDirectory": "E:/Testing AI Agents/BU Horizon/bu_horizon/linux"
+    "cmake.sourceDirectory": "E:/Testing AI Agents/BU Horizon/bu_horizon/linux",
+    "java.configuration.updateBuildConfiguration": "automatic"
 }

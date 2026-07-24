@@ -4,11 +4,13 @@ import 'package:intl/intl.dart';
 import '../di/di.dart';
 import '../models/course_offering.dart';
 import '../repositories/attendance_repository.dart';
+import '../repositories/class_schedule_repository.dart';
 import '../repositories/course_repository.dart';
 import '../supabase/session_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/motion.dart';
+import '../widgets/term_selector.dart';
 
 /// Course-first attendance for the signed-in student's department and batch.
 ///
@@ -32,8 +34,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   String? _error;
   List<CourseOffering> _courses = const [];
   Map<String, AttendanceCourseSummary> _summaries = const {};
+  List<int> _availableTerms = [];
+  int? _selectedTerm;
 
   bool get _isCr => _session.profile?.role.toLowerCase() == 'cr';
+
+  List<CourseOffering> get _filteredCourses =>
+      _courses.where((c) => (c.termNumber ?? 1) == _selectedTerm).toList();
 
   @override
   void initState() {
@@ -65,8 +72,20 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         ),
       );
       if (!mounted) return;
+      final currentTerm = _session.profile?.currentTerm;
+      final availableTerms =
+          courses.map((c) => c.termNumber ?? 1).toSet().toList()..sort();
       setState(() {
         _courses = courses;
+        _availableTerms = availableTerms;
+        if (_selectedTerm == null || !availableTerms.contains(_selectedTerm)) {
+          _selectedTerm = currentTerm;
+        }
+        if ((_selectedTerm == null ||
+                !availableTerms.contains(_selectedTerm)) &&
+            availableTerms.isNotEmpty) {
+          _selectedTerm = availableTerms.last;
+        }
         _summaries = {
           for (final summary in summaries) summary.offeringId: summary,
         };
@@ -176,58 +195,173 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               label: const Text('Add course'),
             )
           : null,
-      body: RefreshIndicator(
-        color: context.colors.primary,
-        backgroundColor: context.colors.surfaceAlt,
-        onRefresh: _load,
-        semanticsLabel: 'Refresh attendance courses',
-        child: _loading
-            ? const _CourseSkeletonList()
-            : _error != null
-            ? _ErrorList(message: _error!, onRetry: _load)
-            : _courses.isEmpty
-            ? ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                children: [
-                  const SizedBox(height: 100),
-                  EmptyState(
-                    icon: Icons.menu_book_outlined,
-                    title: 'No courses yet',
-                    message: _isCr
-                        ? 'Add the first course for your batch to start recording attendance.'
-                        : 'Your CR has not added any courses for this batch yet.',
-                  ),
-                ],
-              )
-            : ListView.separated(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-                itemCount: _courses.length + 1,
-                separatorBuilder: (_, index) =>
-                    SizedBox(height: index == 0 ? 14 : 10),
-                itemBuilder: (context, index) {
-                  if (index == 0) {
-                    return _CourseListHeader(
-                      subtitle: scope.isEmpty
-                          ? 'Courses assigned to your batch'
-                          : scope,
-                      isCr: _isCr,
-                    );
-                  }
-                  final course = _courses[index - 1];
-                  return Entrance(
-                    index: index - 1,
-                    child: _AttendanceCourseCard(
-                      course: course,
-                      summary: _summaries[course.id],
-                      isCr: _isCr,
-                      onTap: () => _openCourse(course),
-                      onEdit: () => _editCourse(course),
-                      onDelete: () => _deleteCourse(course),
+      body: ResponsivePage(
+        child: RefreshIndicator(
+          color: context.colors.primary,
+          backgroundColor: context.colors.surfaceAlt,
+          onRefresh: _load,
+          semanticsLabel: 'Refresh attendance courses',
+          child: _loading
+              ? const _CourseSkeletonList()
+              : _error != null
+              ? _ErrorList(message: _error!, onRetry: _load)
+              : _filteredCourses.isEmpty && _courses.isNotEmpty
+              ? ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: [
+                    TermSelector(
+                      terms: _availableTerms,
+                      selectedTerm: _selectedTerm,
+                      onSelected: (term) =>
+                          setState(() => _selectedTerm = term),
                     ),
-                  );
-                },
+                    const SizedBox(height: 100),
+                    EmptyState(
+                      icon: Icons.menu_book_outlined,
+                      title: 'No courses this term',
+                      message: _isCr
+                          ? 'Add a course for this term to start recording attendance.'
+                          : 'Your CR has not added any courses for this term yet.',
+                    ),
+                  ],
+                )
+              : _filteredCourses.isEmpty
+              ? ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: [
+                    const SizedBox(height: 100),
+                    EmptyState(
+                      icon: Icons.menu_book_outlined,
+                      title: 'No courses yet',
+                      message: _isCr
+                          ? 'Add the first course for your batch to start recording attendance.'
+                          : 'Your CR has not added any courses for this batch yet.',
+                    ),
+                  ],
+                )
+              : ListView.separated(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+                  itemCount: _filteredCourses.length + 1,
+                  separatorBuilder: (_, index) =>
+                      SizedBox(height: index == 0 ? 14 : 10),
+                  itemBuilder: (context, index) {
+                    if (index == 0) {
+                      var present = 0;
+                      var total = 0;
+                      for (final c in _filteredCourses) {
+                        final s = _summaries[c.id];
+                        if (s != null) {
+                          present += s.present;
+                          total += s.total;
+                        }
+                      }
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (_availableTerms.isNotEmpty) ...[
+                            TermSelector(
+                              terms: _availableTerms,
+                              selectedTerm: _selectedTerm,
+                              onSelected: (term) =>
+                                  setState(() => _selectedTerm = term),
+                            ),
+                            const SizedBox(height: 16),
+                          ],
+                          if (total > 0) ...[
+                            _SemesterAverageCard(
+                              present: present,
+                              total: total,
+                            ),
+                            const SizedBox(height: 16),
+                          ],
+                          _CourseListHeader(
+                            subtitle: scope.isEmpty
+                                ? 'Courses assigned to your batch'
+                                : scope,
+                            isCr: _isCr,
+                          ),
+                        ],
+                      );
+                    }
+                    final course = _filteredCourses[index - 1];
+                    return Entrance(
+                      index: index - 1,
+                      child: _AttendanceCourseCard(
+                        course: course,
+                        summary: _summaries[course.id],
+                        isCr: _isCr,
+                        onTap: () => _openCourse(course),
+                        onEdit: () => _editCourse(course),
+                        onDelete: () => _deleteCourse(course),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Central semester attendance: the student's average across every course.
+class _SemesterAverageCard extends StatelessWidget {
+  final int present;
+  final int total;
+  const _SemesterAverageCard({required this.present, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = total == 0 ? 0.0 : present / total;
+    final color = _attendanceColor(context, pct, total);
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Semester attendance',
+            style: TextStyle(
+              color: context.colors.textPrimary,
+              fontWeight: FontWeight.w700,
+              fontSize: 15,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${(pct * 100).round()}%',
+                style: TextStyle(
+                  color: color,
+                  fontSize: 30,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
+              const SizedBox(width: 10),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 5),
+                child: Text(
+                  '$present of $total classes across all courses',
+                  style: TextStyle(
+                    color: context.colors.textSecondary,
+                    fontSize: 12.5,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: pct,
+              minHeight: 7,
+              backgroundColor: context.colors.border,
+              valueColor: AlwaysStoppedAnimation(color),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -420,10 +554,14 @@ class _CourseAttendanceScreen extends StatefulWidget {
 }
 
 class _CourseAttendanceScreenState extends State<_CourseAttendanceScreen> {
+  final ClassScheduleRepository _scheduleRepo =
+      getIt<ClassScheduleRepository>();
+
   bool _loading = true;
   String? _error;
   AttendanceCourseSummary? _summary;
   List<AttendanceSession> _sessions = const [];
+  List<ScheduledClass> _schedules = const [];
 
   bool get _isCr => widget.session.profile?.role.toLowerCase() == 'cr';
 
@@ -442,11 +580,13 @@ class _CourseAttendanceScreenState extends State<_CourseAttendanceScreen> {
       final results = await Future.wait<Object>([
         widget.repository.fetchCourseSummary(widget.course.id),
         widget.repository.fetchCourseSessions(widget.course.id),
+        _scheduleRepo.fetchCourseSchedules(widget.course.id),
       ]);
       if (!mounted) return;
       setState(() {
         _summary = results[0] as AttendanceCourseSummary;
         _sessions = results[1] as List<AttendanceSession>;
+        _schedules = results[2] as List<ScheduledClass>;
         _loading = false;
       });
     } catch (_) {
@@ -458,7 +598,10 @@ class _CourseAttendanceScreenState extends State<_CourseAttendanceScreen> {
     }
   }
 
-  Future<void> _openEditor([AttendanceSession? session]) async {
+  Future<void> _openEditor([
+    AttendanceSession? session,
+    ScheduledClass? schedule,
+  ]) async {
     if (!_isCr) {
       showToast(context, 'CR access is no longer active');
       return;
@@ -471,6 +614,7 @@ class _CourseAttendanceScreenState extends State<_CourseAttendanceScreen> {
           repository: widget.repository,
           sessionController: widget.session,
           session: session,
+          schedule: schedule,
         ),
       ),
     );
@@ -480,6 +624,62 @@ class _CourseAttendanceScreenState extends State<_CourseAttendanceScreen> {
         session == null ? 'Attendance recorded' : 'Attendance updated',
       );
       await _load();
+    }
+  }
+
+  Future<void> _editSchedule([ScheduledClass? existing]) async {
+    if (!_isCr) return;
+    final draft = await showDialog<ScheduleDraft>(
+      context: context,
+      builder: (_) => _ScheduleEditorDialog(
+        offeringId: widget.course.id,
+        schedule: existing,
+      ),
+    );
+    if (draft == null || !mounted) return;
+    try {
+      if (existing == null) {
+        await _scheduleRepo.createSchedule(draft);
+      } else {
+        await _scheduleRepo.updateSchedule(existing.id, draft);
+      }
+      if (!mounted) return;
+      showToast(
+        context,
+        existing == null ? 'Class scheduled' : 'Class updated',
+      );
+      await _load();
+    } catch (_) {
+      if (mounted) showToast(context, 'Could not save the class');
+    }
+  }
+
+  Future<void> _deleteSchedule(ScheduledClass schedule) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove scheduled class?'),
+        content: const Text('This removes the scheduled class entry.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await _scheduleRepo.deleteSchedule(schedule.id);
+      if (!mounted) return;
+      showToast(context, 'Class removed');
+      await _load();
+    } catch (_) {
+      if (mounted) showToast(context, 'Could not remove the class');
     }
   }
 
@@ -544,71 +744,122 @@ class _CourseAttendanceScreenState extends State<_CourseAttendanceScreen> {
                   label: const Text('Record attendance'),
                 )
               : null,
-          body: RefreshIndicator(
-            color: context.colors.primary,
-            backgroundColor: context.colors.surfaceAlt,
-            onRefresh: _load,
-            child: _loading
-                ? const _SessionSkeletonList()
-                : _error != null
-                ? _ErrorList(message: _error!, onRetry: _load)
-                : ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 96),
-                    children: [
-                      _AttendanceSummaryCard(
-                        course: widget.course,
-                        summary: _summary!,
-                      ),
-                      const SizedBox(height: 22),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'Class history',
-                              style: TextStyle(
-                                color: context.colors.textPrimary,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ),
-                          Text(
-                            '${_sessions.length} ${_sessions.length == 1 ? 'class' : 'classes'}',
-                            style: TextStyle(
-                              color: context.colors.textMuted,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      if (_sessions.isEmpty)
-                        EmptyState(
-                          icon: Icons.fact_check_outlined,
-                          title: 'No attendance yet',
-                          message: isCr
-                              ? 'Record the first class attendance for this course.'
-                              : 'Your CR has not recorded a class for this course yet.',
-                        )
-                      else
-                        ...List.generate(
-                          _sessions.length,
-                          (index) => Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: Entrance(
-                              index: index,
-                              child: _AttendanceSessionCard(
-                                session: _sessions[index],
-                                isCr: isCr,
-                                onEdit: () => _openEditor(_sessions[index]),
-                                onDelete: () => _delete(_sessions[index]),
-                              ),
-                            ),
-                          ),
+          body: ResponsivePage(
+            child: RefreshIndicator(
+              color: context.colors.primary,
+              backgroundColor: context.colors.surfaceAlt,
+              onRefresh: _load,
+              child: _loading
+                  ? const _SessionSkeletonList()
+                  : _error != null
+                  ? _ErrorList(message: _error!, onRetry: _load)
+                  : ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 96),
+                      children: [
+                        _AttendanceSummaryCard(
+                          course: widget.course,
+                          summary: _summary!,
                         ),
-                    ],
-                  ),
+                        const SizedBox(height: 22),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Scheduled classes',
+                                style: TextStyle(
+                                  color: context.colors.textPrimary,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ),
+                            if (isCr)
+                              TextButton.icon(
+                                onPressed: () => _editSchedule(),
+                                icon: const Icon(Icons.add_rounded, size: 18),
+                                label: const Text('Schedule'),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        if (_schedules.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Text(
+                              isCr
+                                  ? 'Schedule a class, then take attendance for it after it happens.'
+                                  : 'Your CR has not scheduled any classes for this course yet.',
+                              style: TextStyle(
+                                color: context.colors.textMuted,
+                                fontSize: 12.5,
+                              ),
+                            ),
+                          )
+                        else
+                          ...List.generate(
+                            _schedules.length,
+                            (i) => Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: _ScheduledClassCard(
+                                schedule: _schedules[i],
+                                isCr: isCr,
+                                onTake: () => _openEditor(null, _schedules[i]),
+                                onEdit: () => _editSchedule(_schedules[i]),
+                                onDelete: () => _deleteSchedule(_schedules[i]),
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 22),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Class history',
+                                style: TextStyle(
+                                  color: context.colors.textPrimary,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              '${_sessions.length} ${_sessions.length == 1 ? 'class' : 'classes'}',
+                              style: TextStyle(
+                                color: context.colors.textMuted,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        if (_sessions.isEmpty)
+                          EmptyState(
+                            icon: Icons.fact_check_outlined,
+                            title: 'No attendance yet',
+                            message: isCr
+                                ? 'Record the first class attendance for this course.'
+                                : 'Your CR has not recorded a class for this course yet.',
+                          )
+                        else
+                          ...List.generate(
+                            _sessions.length,
+                            (index) => Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: Entrance(
+                                index: index,
+                                child: _AttendanceSessionCard(
+                                  session: _sessions[index],
+                                  isCr: isCr,
+                                  onEdit: () => _openEditor(_sessions[index]),
+                                  onDelete: () => _delete(_sessions[index]),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+            ),
           ),
         );
       },
@@ -836,17 +1087,303 @@ class _AttendanceSessionCard extends StatelessWidget {
   }
 }
 
+/// One scheduled class. CR gets "Take attendance" once the class day arrives;
+/// everyone sees the recorded state afterward.
+class _ScheduledClassCard extends StatelessWidget {
+  final ScheduledClass schedule;
+  final bool isCr;
+  final VoidCallback onTake;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _ScheduledClassCard({
+    required this.schedule,
+    required this.isCr,
+    required this.onTake,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final taken = schedule.attendanceTaken;
+    final canTake =
+        isCr && !taken && schedule.hasStarted && !schedule.isCancelled;
+    final time = _timeRange(schedule.startTime, schedule.endTime);
+    final subtitle = [
+      DateFormat('EEE, MMM d').format(schedule.date),
+      if (time.isNotEmpty) time,
+      if ((schedule.room ?? '').isNotEmpty) schedule.room!,
+    ].join(' • ');
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: context.colors.surfaceAlt,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: canTake
+              ? context.colors.primary.withValues(alpha: 0.45)
+              : context.colors.border,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            schedule.isCancelled
+                ? Icons.event_busy_rounded
+                : taken
+                ? Icons.event_available_rounded
+                : Icons.event_rounded,
+            color: schedule.isCancelled
+                ? context.colors.danger
+                : taken
+                ? context.colors.success
+                : context.colors.primary,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  (schedule.note ?? '').isEmpty ? 'Class' : schedule.note!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: context.colors.textPrimary,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13.5,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    color: context.colors.textSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          if (schedule.isCancelled)
+            _statusChip(context, 'Cancelled', context.colors.danger)
+          else if (taken)
+            _statusChip(context, 'Attendance recorded', context.colors.success)
+          else if (canTake)
+            FilledButton(
+              onPressed: onTake,
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              child: const Text('Take attendance'),
+            )
+          else
+            _statusChip(context, 'Upcoming', context.colors.textMuted),
+          if (isCr)
+            PopupMenuButton<_SessionAction>(
+              tooltip: 'Schedule actions',
+              onSelected: (a) =>
+                  a == _SessionAction.edit ? onEdit() : onDelete(),
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: _SessionAction.edit, child: Text('Edit')),
+                PopupMenuItem(
+                  value: _SessionAction.delete,
+                  child: Text('Remove'),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  static Widget _statusChip(BuildContext context, String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+/// Compact dialog to schedule (or edit) a class for the course.
+class _ScheduleEditorDialog extends StatefulWidget {
+  final String offeringId;
+  final ScheduledClass? schedule;
+  const _ScheduleEditorDialog({required this.offeringId, this.schedule});
+
+  @override
+  State<_ScheduleEditorDialog> createState() => _ScheduleEditorDialogState();
+}
+
+class _ScheduleEditorDialogState extends State<_ScheduleEditorDialog> {
+  late DateTime _date = widget.schedule?.date ?? DateTime.now();
+  late String? _start = widget.schedule?.startTime;
+  late String? _end = widget.schedule?.endTime;
+  late final TextEditingController _room = TextEditingController(
+    text: widget.schedule?.room ?? '',
+  );
+  late final TextEditingController _note = TextEditingController(
+    text: widget.schedule?.note ?? '',
+  );
+
+  @override
+  void dispose() {
+    _room.dispose();
+    _note.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: DateTime.now().subtract(const Duration(days: 30)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (picked != null && mounted) setState(() => _date = picked);
+  }
+
+  Future<void> _pickTime(bool start) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _parseTime(start ? _start : _end) ?? TimeOfDay.now(),
+    );
+    if (picked == null || !mounted) return;
+    setState(
+      () => start ? _start = _storeTime(picked) : _end = _storeTime(picked),
+    );
+  }
+
+  void _submit() {
+    if (_start != null &&
+        _end != null &&
+        _minutes(_end!) <= _minutes(_start!)) {
+      showToast(context, 'End time must be after start time');
+      return;
+    }
+    Navigator.pop(
+      context,
+      ScheduleDraft(
+        offeringId: widget.offeringId,
+        date: _date,
+        startTime: _start,
+        endTime: _end,
+        room: _room.text,
+        note: _note.text,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.schedule == null ? 'Schedule a class' : 'Edit class'),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _EditorField(
+                label: 'Date',
+                value: DateFormat('EEEE, MMM d, yyyy').format(_date),
+                icon: Icons.calendar_today_rounded,
+                onTap: _pickDate,
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _EditorField(
+                      label: 'Start',
+                      value: _displayTime(_start) ?? 'Optional',
+                      icon: Icons.schedule_rounded,
+                      onTap: () => _pickTime(true),
+                      onClear: _start == null
+                          ? null
+                          : () => setState(() => _start = null),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _EditorField(
+                      label: 'End',
+                      value: _displayTime(_end) ?? 'Optional',
+                      icon: Icons.schedule_rounded,
+                      onTap: () => _pickTime(false),
+                      onClear: _end == null
+                          ? null
+                          : () => setState(() => _end = null),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _note,
+                maxLength: 160,
+                decoration: const InputDecoration(
+                  labelText: 'Topic / note (optional)',
+                  hintText: 'e.g. DBMS — normalization',
+                ),
+              ),
+              TextField(
+                controller: _room,
+                maxLength: 60,
+                decoration: const InputDecoration(labelText: 'Room (optional)'),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: Text(widget.schedule == null ? 'Publish' : 'Save'),
+        ),
+      ],
+    );
+  }
+}
+
 class _AttendanceEditorScreen extends StatefulWidget {
   final CourseOffering course;
   final AttendanceRepository repository;
   final SessionController sessionController;
   final AttendanceSession? session;
+  final ScheduledClass? schedule;
 
   const _AttendanceEditorScreen({
     required this.course,
     required this.repository,
     required this.sessionController,
     this.session,
+    this.schedule,
   });
 
   @override
@@ -855,11 +1392,13 @@ class _AttendanceEditorScreen extends StatefulWidget {
 }
 
 class _AttendanceEditorScreenState extends State<_AttendanceEditorScreen> {
-  late DateTime _date = widget.session?.date ?? DateTime.now();
-  late String? _startTime = widget.session?.startTime;
-  late String? _endTime = widget.session?.endTime;
+  late DateTime _date =
+      widget.session?.date ?? widget.schedule?.date ?? DateTime.now();
+  late String? _startTime =
+      widget.session?.startTime ?? widget.schedule?.startTime;
+  late String? _endTime = widget.session?.endTime ?? widget.schedule?.endTime;
   late final TextEditingController _topicController = TextEditingController(
-    text: widget.session?.topic ?? '',
+    text: widget.session?.topic ?? widget.schedule?.note ?? '',
   );
 
   bool _loading = true;
@@ -992,6 +1531,7 @@ class _AttendanceEditorScreenState extends State<_AttendanceEditorScreen> {
         AttendanceSessionDraft(
           offeringId: widget.course.id,
           sessionId: widget.session?.id,
+          scheduleId: widget.schedule?.id,
           date: _date,
           startTime: _startTime,
           endTime: _endTime,
@@ -1030,140 +1570,142 @@ class _AttendanceEditorScreenState extends State<_AttendanceEditorScreen> {
           const SizedBox(width: 6),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-          ? _ErrorList(message: _error!, onRetry: _loadRoster)
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-              children: [
-                Text(
-                  '${widget.course.code} • ${widget.course.title}',
-                  style: TextStyle(
-                    color: context.colors.textPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                _EditorField(
-                  label: 'Class date',
-                  value: DateFormat('EEEE, MMM d, yyyy').format(_date),
-                  icon: Icons.calendar_today_rounded,
-                  onTap: _pickDate,
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _EditorField(
-                        label: 'Start time',
-                        value: _displayTime(_startTime) ?? 'Optional',
-                        icon: Icons.schedule_rounded,
-                        onTap: () => _pickTime(start: true),
-                        onClear: _startTime == null
-                            ? null
-                            : () => setState(() => _startTime = null),
-                      ),
+      body: ResponsivePage(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+            ? _ErrorList(message: _error!, onRetry: _loadRoster)
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                children: [
+                  Text(
+                    '${widget.course.code} • ${widget.course.title}',
+                    style: TextStyle(
+                      color: context.colors.textPrimary,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _EditorField(
-                        label: 'End time',
-                        value: _displayTime(_endTime) ?? 'Optional',
-                        icon: Icons.schedule_rounded,
-                        onTap: () => _pickTime(start: false),
-                        onClear: _endTime == null
-                            ? null
-                            : () => setState(() => _endTime = null),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _topicController,
-                  maxLength: 200,
-                  decoration: const InputDecoration(
-                    labelText: 'Topic (optional)',
-                    hintText: 'What was covered?',
-                    prefixIcon: Icon(Icons.subject_rounded),
-                    border: OutlineInputBorder(),
                   ),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Batch roster',
-                            style: TextStyle(
-                              color: context.colors.textPrimary,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 16,
+                  const SizedBox(height: 18),
+                  _EditorField(
+                    label: 'Class date',
+                    value: DateFormat('EEEE, MMM d, yyyy').format(_date),
+                    icon: Icons.calendar_today_rounded,
+                    onTap: _pickDate,
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _EditorField(
+                          label: 'Start time',
+                          value: _displayTime(_startTime) ?? 'Optional',
+                          icon: Icons.schedule_rounded,
+                          onTap: () => _pickTime(start: true),
+                          onClear: _startTime == null
+                              ? null
+                              : () => setState(() => _startTime = null),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _EditorField(
+                          label: 'End time',
+                          value: _displayTime(_endTime) ?? 'Optional',
+                          icon: Icons.schedule_rounded,
+                          onTap: () => _pickTime(start: false),
+                          onClear: _endTime == null
+                              ? null
+                              : () => setState(() => _endTime = null),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _topicController,
+                    maxLength: 200,
+                    decoration: const InputDecoration(
+                      labelText: 'Topic (optional)',
+                      hintText: 'What was covered?',
+                      prefixIcon: Icon(Icons.subject_rounded),
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Batch roster',
+                              style: TextStyle(
+                                color: context.colors.textPrimary,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 16,
+                              ),
                             ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '$marked/${_members.length} marked • $present present',
+                              style: TextStyle(
+                                color: context.colors.textSecondary,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      PopupMenuButton<AttendanceMark>(
+                        tooltip: 'Mark all students',
+                        onSelected: _markAll,
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                            value: AttendanceMark.present,
+                            child: Text('Mark all present'),
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '$marked/${_members.length} marked • $present present',
-                            style: TextStyle(
-                              color: context.colors.textSecondary,
-                              fontSize: 12,
-                            ),
+                          PopupMenuItem(
+                            value: AttendanceMark.absent,
+                            child: Text('Mark all absent'),
                           ),
                         ],
-                      ),
-                    ),
-                    PopupMenuButton<AttendanceMark>(
-                      tooltip: 'Mark all students',
-                      onSelected: _markAll,
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(
-                          value: AttendanceMark.present,
-                          child: Text('Mark all present'),
-                        ),
-                        PopupMenuItem(
-                          value: AttendanceMark.absent,
-                          child: Text('Mark all absent'),
-                        ),
-                      ],
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: Text(
-                          'Mark all',
-                          style: TextStyle(
-                            color: context.colors.primary,
-                            fontWeight: FontWeight.w600,
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Text(
+                            'Mark all',
+                            style: TextStyle(
+                              color: context.colors.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                if (_members.isEmpty)
-                  const EmptyState(
-                    icon: Icons.group_off_outlined,
-                    title: 'No students found',
-                    message: 'This batch has no active student roster yet.',
-                  )
-                else
-                  ..._members.map(
-                    (member) => Padding(
-                      padding: const EdgeInsets.only(bottom: 9),
-                      child: _RosterRow(
-                        member: member,
-                        mark: _marks[member.profileId],
-                        onChanged: (mark) =>
-                            setState(() => _marks[member.profileId] = mark),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  if (_members.isEmpty)
+                    const EmptyState(
+                      icon: Icons.group_off_outlined,
+                      title: 'No students found',
+                      message: 'This batch has no active student roster yet.',
+                    )
+                  else
+                    ..._members.map(
+                      (member) => Padding(
+                        padding: const EdgeInsets.only(bottom: 9),
+                        child: _RosterRow(
+                          member: member,
+                          mark: _marks[member.profileId],
+                          onChanged: (mark) =>
+                              setState(() => _marks[member.profileId] = mark),
+                        ),
                       ),
                     ),
-                  ),
-              ],
-            ),
+                ],
+              ),
+      ),
     );
   }
 }

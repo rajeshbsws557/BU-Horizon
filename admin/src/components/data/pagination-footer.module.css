@@ -1,0 +1,65 @@
+.pagination {
+  display: flex;
+  min-height: 62px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px 18px;
+  padding: 10px 20px;
+  color: var(--text-muted, #667085);
+  font-size: 12.5px;
+}
+
+.pagination label,
+.pagination > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.pagination select {
+  height: 32px;
+  padding: 0 27px 0 9px;
+  color: var(--text-secondary, #344054);
+  border: 1px solid var(--border, #e5e9f2);
+  border-radius: 8px;
+  background: var(--surface, #ffffff);
+  font: inherit;
+}
+
+.pagination > div button {
+  position: relative;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  color: var(--text-secondary, #344054);
+  border: 1px solid var(--border, #e5e9f2);
+  border-radius: 8px;
+  background: var(--surface, #ffffff);
+  cursor: pointer;
+  place-items: center;
+}
+
+.pagination > div button::before {
+  position: absolute;
+  inset: -4px;
+  content: "";
+}
+
+.pagination > div button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .pagination {
+    align-items: flex-start;
+    padding: 12px 14px;
+  }
+
+  .pagination > span {
+    order: 3;
+    width: 100%;
+  }
+}

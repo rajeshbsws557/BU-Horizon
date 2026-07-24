@@ -22,9 +22,9 @@ class AppBottomNav extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             _item(context, 0, Icons.home_rounded, 'Home'),
-            _item(context, 1, Icons.search_rounded, 'Search'),
+            _item(context, 1, Icons.groups_rounded, 'Club'),
             _centerButton(),
-            _item(context, 3, Icons.notifications_rounded, 'Alerts'),
+            _item(context, 3, Icons.campaign_rounded, 'Notices'),
             _item(context, 4, Icons.person_rounded, 'Profile'),
           ],
         ),
@@ -145,8 +145,8 @@ class _PulsingHubState extends State<_PulsingHub>
         );
       },
       child: const Padding(
-        padding: EdgeInsets.all(11),
-        child: HorizonLogo(size: 30),
+        padding: EdgeInsets.all(3),
+        child: HorizonLogo(size: 46),
       ),
     );
   }

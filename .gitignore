@@ -97,3 +97,8 @@ google-services.json
 *credential*.png
 *secret*.txt
 *secret*.json
+
+# One-off local utility scripts with hardcoded credentials — never commit
+tool/
+supabase/check_users.py
+supabase/run_migration.py

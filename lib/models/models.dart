@@ -171,9 +171,11 @@ class ExamItem with _$ExamItem {
     required String typeLabel,
     required String dateLabel,
     required String timeLabel,
+    @Default('') String offeringId,
     @Default('') String courseCode,
     @Default('') String room,
     @Default('') String description,
+    int? termNumber,
   }) = _ExamItem;
 }
 

@@ -31,7 +31,7 @@ class _SplashScreenState extends State<SplashScreen>
   // Continuous spin for the gradient ring around the logo.
   late final AnimationController _ring = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 3600),
+    duration: const Duration(milliseconds: 3900),
   )..repeat();
 
   Timer? _navTimer;
@@ -53,7 +53,7 @@ class _SplashScreenState extends State<SplashScreen>
   void initState() {
     super.initState();
     _intro.forward();
-    _navTimer = Timer(const Duration(milliseconds: 1500), () {
+    _navTimer = Timer(const Duration(milliseconds: 3200), () {
       if (mounted) context.go(AppRoutes.home);
     });
   }

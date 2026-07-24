@@ -35,7 +35,11 @@ class ReferenceDataService {
   }
 
   Future<List<FacultyOption>> faculties() async {
-    final rows = await _client.from('faculties').select('id, name').order('name');
+    final rows = await _client
+        .from('faculties')
+        .select('id, name')
+        .order('name')
+        .timeout(const Duration(seconds: 15));
     return rows
         .map((r) => FacultyOption(id: r['id'] as String, name: r['name'] as String))
         .toList();
@@ -45,7 +49,8 @@ class ReferenceDataService {
     final rows = await _client
         .from('departments')
         .select('id, faculty_id, name, code')
-        .order('name');
+        .order('name')
+        .timeout(const Duration(seconds: 15));
     return rows
         .map((r) => DepartmentOption(
               id: r['id'] as String,
@@ -67,7 +72,8 @@ class ReferenceDataService {
         .select('id, programs!inner(department_id)')
         .eq('session', session)
         .eq('programs.department_id', departmentId)
-        .maybeSingle();
+        .maybeSingle()
+        .timeout(const Duration(seconds: 15));
     return row == null ? null : row['id'] as String?;
   }
 }

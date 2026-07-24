@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from "react";
 
+import { useBodyScrollLock } from "./use-body-scroll-lock";
+
 const FOCUSABLE_SELECTOR = [
   "button:not([disabled])",
   "a[href]",
@@ -17,6 +19,8 @@ export function useDialogFocus<T extends HTMLElement>(
 ) {
   const dialogRef = useRef<T>(null);
   const onEscapeRef = useRef(onEscape);
+
+  useBodyScrollLock(open);
 
   useEffect(() => {
     onEscapeRef.current = onEscape;

@@ -1,15 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../di/di.dart';
 import '../models/course_offering.dart';
 import '../models/models.dart';
+import '../repositories/attendance_repository.dart';
 import '../repositories/course_repository.dart';
+import '../repositories/exam_repository.dart';
 import '../repositories/notice_repository.dart';
+import '../repositories/resource_repository.dart';
 import '../supabase/session_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/course_catalog.dart';
 import '../widgets/motion.dart';
+import 'exam_schedule_screen.dart';
+import 'resources_screen.dart';
 
 /// Course-first class notices for the signed-in student's batch.
 ///
@@ -122,7 +128,7 @@ class _ClassNoticesScreenState extends State<ClassNoticesScreen> {
   void _openCourse(CourseOffering course) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => _CourseNoticesScreen(course: course),
+        builder: (_) => _CourseHubScreen(course: course),
       ),
     );
   }
@@ -167,20 +173,33 @@ class _ClassNoticesScreenState extends State<ClassNoticesScreen> {
   }
 }
 
-class _CourseNoticesScreen extends StatefulWidget {
+class _CourseHubScreen extends StatefulWidget {
   final CourseOffering course;
 
-  const _CourseNoticesScreen({required this.course});
+  const _CourseHubScreen({required this.course});
 
   @override
-  State<_CourseNoticesScreen> createState() => _CourseNoticesScreenState();
+  State<_CourseHubScreen> createState() => _CourseHubScreenState();
 }
 
-class _CourseNoticesScreenState extends State<_CourseNoticesScreen> {
-  late final NoticeRepository _repository = getIt<NoticeRepository>();
+class _CourseHubScreenState extends State<_CourseHubScreen>
+    with SingleTickerProviderStateMixin {
+  late final NoticeRepository _noticeRepo = getIt<NoticeRepository>();
+  late final ResourceRepository _resourceRepo = getIt<ResourceRepository>();
+  late final ExamRepository _examRepo = getIt<ExamRepository>();
+  late final AttendanceRepository _attendanceRepo =
+      getIt<AttendanceRepository>();
+
+  late final TabController _tabController;
+
   bool _loading = true;
   bool _mutating = false;
+
+  // Data sources
+  AttendanceCourseSummary? _attendance;
   List<ClassNotice> _notices = const [];
+  List<ResourceItem> _resources = const [];
+  List<ExamItem> _exams = const [];
 
   bool get _canManage =>
       getIt<SessionController>().profile?.role.toLowerCase() == 'cr';
@@ -188,30 +207,50 @@ class _CourseNoticesScreenState extends State<_CourseNoticesScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
+    _loadAll();
   }
 
-  Future<void> _load() async {
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadAll() async {
     if (mounted) setState(() => _loading = true);
     try {
-      final notices = await _repository.fetchCourseNotices(widget.course.id);
+      final results = await Future.wait([
+        _attendanceRepo.fetchCourseSummary(widget.course.id),
+        _noticeRepo.fetchCourseNotices(widget.course.id),
+        _resourceRepo.fetchResources(offeringId: widget.course.id),
+        _examRepo.fetchCourseExams(widget.course.id),
+      ]);
       if (!mounted) return;
       setState(() {
-        _notices = notices;
+        _attendance = results[0] as AttendanceCourseSummary;
+        _notices = results[1] as List<ClassNotice>;
+        _resources = results[2] as List<ResourceItem>;
+        _exams = results[3] as List<ExamItem>;
         _loading = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() => _loading = false);
-      showToast(context, 'Could not load class notices');
+      showToast(context, 'Could not load course data');
     }
   }
+
+  // ── Notice mutations ──────────────────────────────────────────────────
 
   Future<void> _addNotice() async {
     final input = await _showNoticeEditor(context);
     if (input == null || !mounted) return;
     await _runMutation(
-      () => _repository.createCourseNotice(
+      () => _noticeRepo.createCourseNotice(
         offeringId: widget.course.id,
         title: input.title,
         body: input.body,
@@ -226,7 +265,7 @@ class _CourseNoticesScreenState extends State<_CourseNoticesScreen> {
     final input = await _showNoticeEditor(context, notice: notice);
     if (input == null || !mounted) return;
     await _runMutation(
-      () => _repository.updateCourseNotice(
+      () => _noticeRepo.updateCourseNotice(
         noticeId: notice.id,
         title: input.title,
         body: input.body,
@@ -242,7 +281,7 @@ class _CourseNoticesScreenState extends State<_CourseNoticesScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete notice?'),
-        content: Text('“${notice.title}” will no longer be visible to students.'),
+        content: Text('"${notice.title}" will no longer be visible to students.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -260,10 +299,121 @@ class _CourseNoticesScreenState extends State<_CourseNoticesScreen> {
     );
     if (confirmed != true || !mounted) return;
     await _runMutation(
-      () => _repository.deleteCourseNotice(notice.id),
+      () => _noticeRepo.deleteCourseNotice(notice.id),
       successMessage: 'Class notice deleted',
     );
   }
+
+  Future<void> _addResource() async {
+    final input = await showResourceEditorSheet(context);
+    if (input == null || !mounted) return;
+    await _runMutation(
+      () => _resourceRepo.createResource(
+        offeringId: widget.course.id,
+        title: input.title,
+        description: input.description,
+        kind: input.kind,
+        url: input.url,
+        upload: input.upload,
+      ),
+      successMessage: 'Resource shared',
+    );
+  }
+
+  Future<void> _editResource(ResourceItem resource) async {
+    final input = await showResourceEditorSheet(context, resource: resource);
+    if (input == null || !mounted) return;
+    await _runMutation(
+      () => _resourceRepo.updateResource(
+        resourceId: resource.id,
+        title: input.title,
+        description: input.description,
+        kind: input.kind,
+        url: input.url,
+        upload: input.upload,
+        keepExistingUpload: input.keepExistingUpload,
+      ),
+      successMessage: 'Resource updated',
+    );
+  }
+
+  Future<void> _deleteResource(ResourceItem resource) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete resource?'),
+        content: Text('Are you sure you want to delete "${resource.title}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: ctx.colors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _runMutation(
+      () => _resourceRepo.deleteResource(resource.id),
+      successMessage: 'Resource deleted',
+    );
+  }
+
+  Future<void> _addExam() async {
+    final input = await showExamEditorSheet(context);
+    if (input == null || !mounted) return;
+    await _runMutation(
+      () => _examRepo.createExam(
+        offeringId: widget.course.id,
+        input: input,
+      ),
+      successMessage: 'Exam notice published',
+    );
+  }
+
+  Future<void> _editExam(ExamItem exam) async {
+    final input = await showExamEditorSheet(context, exam: exam);
+    if (input == null || !mounted) return;
+    await _runMutation(
+      () => _examRepo.updateExam(
+        examId: exam.id,
+        input: input,
+      ),
+      successMessage: 'Exam notice updated',
+    );
+  }
+
+  Future<void> _deleteExam(ExamItem exam) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Exam Notice?'),
+        content: Text('Are you sure you want to delete "${exam.title}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: ctx.colors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _runMutation(
+      () => _examRepo.deleteExam(exam.id),
+      successMessage: 'Exam notice deleted',
+    );
+  }
+
+  // ── Shared mutation runner ─────────────────────────────────────────────
 
   Future<void> _runMutation(
     Future<void> Function() operation, {
@@ -275,12 +425,43 @@ class _CourseNoticesScreenState extends State<_CourseNoticesScreen> {
       await operation();
       if (!mounted) return;
       showToast(context, successMessage);
-      await _load();
+      await _loadAll();
     } catch (_) {
       if (mounted) showToast(context, 'Could not save that change');
     } finally {
       if (mounted) setState(() => _mutating = false);
     }
+  }
+
+  // ── FAB for active tab ────────────────────────────────────────────────
+
+  Widget? _buildFab(bool canManage) {
+    if (!canManage) return null;
+    final tab = _tabController.index;
+    final (icon, label, onPressed) = switch (tab) {
+      0 => (
+            Icons.add_rounded,
+            'Add notice',
+            _mutating ? null : _addNotice,
+          ),
+      1 => (
+            Icons.add_rounded,
+            'Add resource',
+            _mutating ? null : _addResource,
+          ),
+      2 => (
+            Icons.add_rounded,
+            'Add exam',
+            _mutating ? null : _addExam,
+          ),
+      _ => (null, '', null),
+    };
+    if (icon == null) return null;
+    return FloatingActionButton.extended(
+      onPressed: onPressed as VoidCallback?,
+      icon: Icon(icon),
+      label: Text(label),
+    );
   }
 
   @override
@@ -304,7 +485,9 @@ class _CourseNoticesScreenState extends State<_CourseNoticesScreen> {
                   ),
                 ),
                 Text(
-                  'Class notices',
+                  widget.course.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: context.colors.textSecondary,
                     fontSize: 11.5,
@@ -316,63 +499,282 @@ class _CourseNoticesScreenState extends State<_CourseNoticesScreen> {
             backgroundColor: Colors.transparent,
             iconTheme: IconThemeData(color: context.colors.textPrimary),
           ),
-          floatingActionButton: canManage
-              ? FloatingActionButton.extended(
-                  onPressed: _mutating ? null : _addNotice,
-                  icon: const Icon(Icons.add_rounded),
-                  label: const Text('Add notice'),
-                )
-              : null,
-          body: RefreshIndicator(
-            color: context.colors.primary,
-            backgroundColor: context.colors.surfaceAlt,
-            onRefresh: _load,
-            child: _loading
-                ? const _NoticeSkeletonList()
-                : _notices.isEmpty
-                    ? ListView(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        children: [
-                          _CourseHeader(course: widget.course),
-                          SizedBox(
-                            height: MediaQuery.sizeOf(context).height * 0.48,
-                            child: EmptyState(
-                              icon: Icons.campaign_outlined,
-                              title: 'No class notices yet',
-                              message: canManage
-                                  ? 'Publish the first notice for this course.'
-                                  : 'Your CR has not posted a notice for this course yet.',
-                            ),
-                          ),
-                        ],
-                      )
-                    : ListView.separated(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.fromLTRB(
-                          AppSpacing.lg,
-                          0,
-                          AppSpacing.lg,
-                          96,
+          floatingActionButton: _buildFab(canManage),
+          body: _loading
+              ? const _HubSkeletonView()
+              : RefreshIndicator(
+                  color: context.colors.primary,
+                  backgroundColor: context.colors.surfaceAlt,
+                  onRefresh: _loadAll,
+                  child: NestedScrollView(
+                    headerSliverBuilder: (context, innerBoxIsScrolled) => [
+                      // Attendance summary card
+                      SliverToBoxAdapter(
+                        child: _AttendanceSummaryCard(
+                          attendance: _attendance,
                         ),
-                        itemCount: _notices.length + 1,
-                        separatorBuilder: (_, __) =>
-                            const SizedBox(height: AppSpacing.md),
-                        itemBuilder: (context, index) {
-                          if (index == 0) {
-                            return _CourseHeader(course: widget.course);
-                          }
-                          final notice = _notices[index - 1];
-                          return Entrance(
-                            index: index - 1,
-                            child: _NoticeCard(
-                              notice: notice,
-                              canManage: canManage,
-                              onEdit: () => _editNotice(notice),
-                              onDelete: () => _deleteNotice(notice),
-                            ),
-                          );
-                        },
                       ),
+                      // Sticky tab bar
+                      SliverPersistentHeader(
+                        pinned: true,
+                        delegate: _StickyTabBarDelegate(
+                          tabBar: TabBar(
+                            controller: _tabController,
+                            labelColor: context.colors.primary,
+                            unselectedLabelColor: context.colors.textMuted,
+                            indicatorColor: context.colors.primary,
+                            indicatorSize: TabBarIndicatorSize.label,
+                            indicatorWeight: 2.5,
+                            labelStyle: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            ),
+                            unselectedLabelStyle: const TextStyle(
+                              fontWeight: FontWeight.w500,
+                              fontSize: 13,
+                            ),
+                            tabs: [
+                              Tab(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.campaign_rounded, size: 16),
+                                    const SizedBox(width: 5),
+                                    const Text('Notices'),
+                                    if (_notices.isNotEmpty) ...[
+                                      const SizedBox(width: 5),
+                                      _TabBadge(count: _notices.length),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              Tab(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.folder_rounded, size: 16),
+                                    const SizedBox(width: 5),
+                                    const Text('Resources'),
+                                    if (_resources.isNotEmpty) ...[
+                                      const SizedBox(width: 5),
+                                      _TabBadge(count: _resources.length),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              Tab(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.edit_calendar_rounded, size: 16),
+                                    const SizedBox(width: 5),
+                                    const Text('Exams'),
+                                    if (_exams.isNotEmpty) ...[
+                                      const SizedBox(width: 5),
+                                      _TabBadge(count: _exams.length),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          color: context.colors.surface,
+                        ),
+                      ),
+                    ],
+                    body: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _NoticesTab(
+                          notices: _notices,
+                          canManage: canManage,
+                          onEdit: _editNotice,
+                          onDelete: _deleteNotice,
+                        ),
+                        _ResourcesTab(
+                          resources: _resources,
+                          repository: _resourceRepo,
+                          canManage: canManage,
+                          onEdit: _editResource,
+                          onDelete: _deleteResource,
+                        ),
+                        _ExamsTab(
+                          exams: _exams,
+                          canManage: canManage,
+                          onEdit: _editExam,
+                          onDelete: _deleteExam,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+        );
+      },
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Attendance Summary Card
+// ═════════════════════════════════════════════════════════════════════════════
+
+class _AttendanceSummaryCard extends StatelessWidget {
+  final AttendanceCourseSummary? attendance;
+
+  const _AttendanceSummaryCard({this.attendance});
+
+  @override
+  Widget build(BuildContext context) {
+    final att = attendance;
+    final pct = att?.percentage ?? 0;
+    final present = att?.present ?? 0;
+    final total = att?.total ?? 0;
+    final pctLabel = total == 0 ? '—' : '${(pct * 100).round()}%';
+    final statusColor = total == 0
+        ? context.colors.textMuted
+        : pct >= 0.75
+            ? context.colors.success
+            : pct >= 0.6
+                ? context.colors.warning
+                : context.colors.danger;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.sm,
+      ),
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            statusColor.withValues(alpha: 0.12),
+            context.colors.surfaceAlt,
+          ],
+        ),
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(
+          color: statusColor.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 54,
+            height: 54,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox.expand(
+                  child: CircularProgressIndicator(
+                    value: total == 0 ? 0 : pct,
+                    strokeWidth: 5,
+                    strokeCap: StrokeCap.round,
+                    backgroundColor: statusColor.withValues(alpha: 0.15),
+                    valueColor: AlwaysStoppedAnimation(statusColor),
+                  ),
+                ),
+                Text(
+                  pctLabel,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.lg),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Overall Attendance',
+                  style: TextStyle(
+                    color: context.colors.textPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  total == 0
+                      ? 'No classes recorded yet'
+                      : '$present present out of $total ${total == 1 ? 'class' : 'classes'}',
+                  style: TextStyle(
+                    color: context.colors.textSecondary,
+                    fontSize: 12.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Icon(
+            total == 0
+                ? Icons.hourglass_empty_rounded
+                : pct >= 0.75
+                    ? Icons.check_circle_rounded
+                    : Icons.warning_rounded,
+            color: statusColor,
+            size: 22,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Tab Widgets
+// ═════════════════════════════════════════════════════════════════════════════
+
+class _NoticesTab extends StatelessWidget {
+  final List<ClassNotice> notices;
+  final bool canManage;
+  final ValueChanged<ClassNotice> onEdit;
+  final ValueChanged<ClassNotice> onDelete;
+
+  const _NoticesTab({
+    required this.notices,
+    required this.canManage,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (notices.isEmpty) {
+      return Center(
+        child: EmptyState(
+          icon: Icons.campaign_outlined,
+          title: 'No class notices yet',
+          message: canManage
+              ? 'Publish the first notice for this course.'
+              : 'Your CR has not posted a notice for this course yet.',
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        96,
+      ),
+      itemCount: notices.length,
+      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.md),
+      itemBuilder: (context, index) {
+        final notice = notices[index];
+        return Entrance(
+          index: index,
+          child: _NoticeCard(
+            notice: notice,
+            canManage: canManage,
+            onEdit: () => onEdit(notice),
+            onDelete: () => onDelete(notice),
           ),
         );
       },
@@ -380,67 +782,183 @@ class _CourseNoticesScreenState extends State<_CourseNoticesScreen> {
   }
 }
 
-class _CourseHeader extends StatelessWidget {
-  final CourseOffering course;
-  const _CourseHeader({required this.course});
+class _ResourcesTab extends StatelessWidget {
+  final List<ResourceItem> resources;
+  final ResourceRepository repository;
+  final bool canManage;
+  final void Function(ResourceItem) onEdit;
+  final void Function(ResourceItem) onDelete;
+
+  const _ResourcesTab({
+    required this.resources,
+    required this.repository,
+    required this.canManage,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  Future<void> _open(BuildContext context, ResourceItem resource) async {
+    try {
+      final target = await repository.resolveResourceUrl(resource);
+      if (target.isEmpty) {
+        if (context.mounted) showToast(context, 'This resource is no longer available');
+        return;
+      }
+      final uri = Uri.tryParse(target);
+      final opened = uri != null &&
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (opened || !context.mounted) return;
+    } catch (_) {
+      if (!context.mounted) return;
+    }
+    if (context.mounted) {
+      showToast(context, 'Could not open ${resource.title}');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (resources.isEmpty) {
+      return Center(
+        child: EmptyState(
+          icon: Icons.folder_open_outlined,
+          title: 'No resources yet',
+          message: canManage
+              ? 'Share the first file or link for this course.'
+              : 'Your CR has not shared a resource for this course yet.',
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        96,
+      ),
+      itemCount: resources.length,
+      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.md),
+      itemBuilder: (context, index) {
+        final resource = resources[index];
+        return Entrance(
+          index: index,
+          child: ResourceCard(
+            resource: resource,
+            canManage: canManage,
+            onOpen: () => _open(context, resource),
+            onEdit: () => onEdit(resource),
+            onDelete: () => onDelete(resource),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ExamsTab extends StatelessWidget {
+  final List<ExamItem> exams;
+  final bool canManage;
+  final void Function(ExamItem) onEdit;
+  final void Function(ExamItem) onDelete;
+
+  const _ExamsTab({
+    required this.exams,
+    required this.canManage,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (exams.isEmpty) {
+      return const Center(
+        child: EmptyState(
+          icon: Icons.edit_calendar_outlined,
+          title: 'No exams scheduled',
+          message:
+              'Your CR has not published any exam notices for this course yet.',
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        96,
+      ),
+      itemCount: exams.length,
+      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.md),
+      itemBuilder: (context, index) {
+        final exam = exams[index];
+        return Entrance(
+          index: index,
+          child: ExamCard(
+            exam: exam,
+            canManage: canManage,
+            onEdit: () => onEdit(exam),
+            onDelete: () => onDelete(exam),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Shared Widgets
+// ═════════════════════════════════════════════════════════════════════════════
+
+class _TabBadge extends StatelessWidget {
+  final int count;
+  const _TabBadge({required this.count});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.all(AppSpacing.lg),
-      padding: const EdgeInsets.all(AppSpacing.lg),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            context.colors.primary.withValues(alpha: 0.18),
-            context.colors.accentCyan.withValues(alpha: 0.08),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        border: Border.all(
-          color: context.colors.primary.withValues(alpha: 0.25),
-        ),
+        color: context.colors.primary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              color: context.colors.primary,
-              borderRadius: BorderRadius.circular(AppRadii.md),
-            ),
-            child: const Icon(Icons.menu_book_rounded, color: Colors.white),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  course.code,
-                  style: TextStyle(
-                    color: context.colors.primary,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  course.title,
-                  style: TextStyle(
-                    color: context.colors.textPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+      child: Text(
+        '$count',
+        style: TextStyle(
+          color: context.colors.primary,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
+}
+
+class _StickyTabBarDelegate extends SliverPersistentHeaderDelegate {
+  final TabBar tabBar;
+  final Color color;
+
+  const _StickyTabBarDelegate({required this.tabBar, required this.color});
+
+  @override
+  double get minExtent => tabBar.preferredSize.height;
+  @override
+  double get maxExtent => tabBar.preferredSize.height;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return Container(
+      color: color,
+      child: tabBar,
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _StickyTabBarDelegate oldDelegate) =>
+      tabBar != oldDelegate.tabBar || color != oldDelegate.color;
 }
 
 class _NoticeCard extends StatelessWidget {
@@ -612,46 +1130,94 @@ class _NoticeChip extends StatelessWidget {
   }
 }
 
-class _NoticeSkeletonList extends StatelessWidget {
-  const _NoticeSkeletonList();
+class _HubSkeletonView extends StatelessWidget {
+  const _HubSkeletonView();
 
   @override
   Widget build(BuildContext context) {
-    return ListView.separated(
+    return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(AppSpacing.lg),
-      itemCount: 4,
-      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.md),
-      itemBuilder: (_, __) => Container(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        decoration: cardDecoration(context: context),
-        child: const Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Skeleton(
-              height: 42,
-              width: 42,
-              radius: BorderRadius.all(Radius.circular(AppRadii.md)),
-            ),
-            SizedBox(width: AppSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Skeleton(height: 12, width: 75),
-                  SizedBox(height: AppSpacing.sm),
-                  Skeleton(height: 14, width: 190),
-                  SizedBox(height: AppSpacing.sm),
-                  Skeleton(height: 12, width: 230),
-                ],
+      children: [
+        // Attendance skeleton
+        Container(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          decoration: BoxDecoration(
+            color: context.colors.surfaceAlt,
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            border: Border.all(color: context.colors.border),
+          ),
+          child: const Row(
+            children: [
+              Skeleton(
+                height: 54,
+                width: 54,
+                radius: BorderRadius.all(Radius.circular(27)),
               ),
-            ),
+              SizedBox(width: AppSpacing.lg),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Skeleton(height: 14, width: 140),
+                    SizedBox(height: AppSpacing.sm),
+                    Skeleton(height: 12, width: 200),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xl),
+        // Tab bar skeleton
+        const Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            Skeleton(height: 12, width: 80),
+            Skeleton(height: 12, width: 80),
+            Skeleton(height: 12, width: 80),
           ],
         ),
-      ),
+        const SizedBox(height: AppSpacing.xl),
+        // Card skeletons
+        for (var i = 0; i < 3; i++) ...[
+          Container(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            decoration: cardDecoration(context: context),
+            child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Skeleton(
+                  height: 42,
+                  width: 42,
+                  radius: BorderRadius.all(Radius.circular(AppRadii.md)),
+                ),
+                SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Skeleton(height: 12, width: 75),
+                      SizedBox(height: AppSpacing.sm),
+                      Skeleton(height: 14, width: 190),
+                      SizedBox(height: AppSpacing.sm),
+                      Skeleton(height: 12, width: 230),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+        ],
+      ],
     );
   }
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Notice Editor Bottom Sheet
+// ═════════════════════════════════════════════════════════════════════════════
 
 typedef _NoticeInput = ({
   String title,

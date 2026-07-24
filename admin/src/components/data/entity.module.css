@@ -56,13 +56,13 @@
 }
 
 .readOnlyBadge {
-  color: #6941c6;
-  background: #f4f0ff;
+  color: var(--purple-strong);
+  background: var(--purple-soft);
 }
 
 .softDeleteBadge {
-  color: #175cd3;
-  background: #eff8ff;
+  color: var(--info-strong);
+  background: var(--info-soft);
 }
 
 .headerActions,
@@ -117,18 +117,18 @@
 .secondaryButton:hover:not(:disabled),
 .toolbarButton:hover:not(:disabled) {
   color: var(--text, #172033);
-  border-color: #b9c3d6;
+  border-color: var(--border-strong, #d8deea);
   background: var(--surface-subtle, #f8fafc);
 }
 
 .dangerButton {
   color: #ffffff;
-  background: #d92d20;
+  background: var(--danger-solid);
   box-shadow: 0 3px 10px rgb(217 45 32 / 18%);
 }
 
 .dangerButton:hover:not(:disabled) {
-  background: #b42318;
+  background: var(--danger-solid-hover);
 }
 
 .primaryButton:disabled,
@@ -155,15 +155,15 @@
 }
 
 .infoBanner {
-  color: #175cd3;
-  border-color: #b2ddff;
-  background: #eff8ff;
+  color: var(--info-strong);
+  border-color: var(--info-border);
+  background: var(--info-soft);
 }
 
 .warningBanner {
-  color: #93370d;
-  border-color: #fedf89;
-  background: #fffaeb;
+  color: var(--warning-strong);
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
 }
 
 .infoBanner svg,
@@ -189,59 +189,6 @@
   justify-content: space-between;
   gap: 16px;
   padding: 18px 22px 14px;
-}
-
-.searchBox {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 9px;
-  max-width: 380px;
-  height: 42px;
-  padding: 0 11px;
-  color: var(--text-muted, #667085);
-  border: 1px solid var(--border-strong, #d8deea);
-  border-radius: 10px;
-  background: var(--surface, #ffffff);
-  transition: border-color 140ms ease, box-shadow 140ms ease;
-}
-
-.searchBox:focus-within {
-  color: var(--primary, #1b6bf3);
-  border-color: var(--primary, #1b6bf3);
-  box-shadow: 0 0 0 3px rgb(27 107 243 / 10%);
-}
-
-.searchBox input {
-  min-width: 0;
-  flex: 1;
-  color: var(--text, #172033);
-  border: 0;
-  outline: 0;
-  background: transparent;
-  font: inherit;
-  font-size: 13.5px;
-}
-
-.searchBox input::placeholder {
-  color: var(--text-subtle, #98a2b3);
-}
-
-.searchBox input:disabled {
-  cursor: not-allowed;
-}
-
-.searchBox button {
-  display: grid;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  color: var(--text-muted, #667085);
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  cursor: pointer;
-  place-items: center;
 }
 
 .archiveToggle {
@@ -455,7 +402,7 @@
   position: sticky;
   z-index: 1;
   right: 0;
-  width: 92px;
+  width: 104px;
   text-align: right;
   white-space: nowrap;
   box-shadow: -8px 0 12px -12px rgb(15 23 42 / 30%);
@@ -464,9 +411,10 @@
 .rowActions > button,
 .actionMenu > summary,
 .iconButton {
+  position: relative;
   display: inline-grid;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   padding: 0;
   color: var(--text-muted, #667085);
   border: 1px solid transparent;
@@ -474,6 +422,15 @@
   background: transparent;
   cursor: pointer;
   place-items: center;
+}
+
+/* Expand the tappable area to 44x44 without growing the visible control. */
+.rowActions > button::before,
+.actionMenu > summary::before,
+.iconButton::before {
+  position: absolute;
+  inset: -4px;
+  content: "";
 }
 
 .rowActions > button:hover,
@@ -486,7 +443,7 @@
 
 .actionMenu {
   display: inline-block;
-  margin-left: 2px;
+  margin-left: 8px;
   text-align: left;
 }
 
@@ -529,11 +486,11 @@
 }
 
 .actionMenu .menuDanger {
-  color: #b42318;
+  color: var(--danger-strong);
 }
 
 .actionMenu .menuDanger:hover {
-  background: #fff1f0;
+  background: var(--danger-soft);
 }
 
 .nullValue {
@@ -561,11 +518,11 @@
 }
 
 .booleanTrue {
-  color: #067647;
+  color: var(--success-strong);
 }
 
 .booleanTrue span {
-  background: #dcfae6;
+  background: var(--success-soft);
 }
 
 .booleanFalse {
@@ -588,28 +545,28 @@
 }
 
 .badgeSuccess {
-  color: #067647;
-  background: #ecfdf3;
+  color: var(--success-strong);
+  background: var(--success-soft);
 }
 
 .badgeDanger {
-  color: #b42318;
-  background: #fef3f2;
+  color: var(--danger-strong);
+  background: var(--danger-soft);
 }
 
 .badgeWarning {
-  color: #b54708;
-  background: #fffaeb;
+  color: var(--warning-strong);
+  background: var(--warning-soft);
 }
 
 .badgePurple {
-  color: #6941c6;
-  background: #f4f0ff;
+  color: var(--purple-strong);
+  background: var(--purple-soft);
 }
 
 .badgeNeutral {
-  color: #475467;
-  background: #f2f4f7;
+  color: var(--neutral-strong);
+  background: var(--neutral-soft);
 }
 
 .uuidValue {
@@ -629,7 +586,7 @@
 
 .uuidValue:hover {
   color: var(--primary, #1b6bf3);
-  border-color: #b2ccff;
+  border-color: var(--info-border);
 }
 
 .textValue,
@@ -661,7 +618,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: #6941c6;
+  color: var(--purple-strong);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11.5px;
 }
@@ -693,9 +650,9 @@
   height: 52px;
   margin-bottom: 12px;
   color: var(--primary, #1b6bf3);
-  border: 1px solid #dbe7ff;
+  border: 1px solid var(--info-border);
   border-radius: 15px;
-  background: #f5f8ff;
+  background: var(--info-soft);
   place-items: center;
 }
 
@@ -721,8 +678,8 @@
   align-items: center;
   gap: 13px;
   padding: 18px 20px;
-  color: #b42318;
-  background: #fff6f5;
+  color: var(--danger-strong);
+  background: var(--danger-soft);
 }
 
 .tableError > div {
@@ -736,52 +693,6 @@
 .tableError p {
   margin: 3px 0 0;
   font-size: 12.5px;
-}
-
-.pagination {
-  display: flex;
-  min-height: 62px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 10px 20px;
-  color: var(--text-muted, #667085);
-  font-size: 12.5px;
-}
-
-.pagination label,
-.pagination > div {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-
-.pagination select {
-  height: 32px;
-  padding: 0 27px 0 9px;
-  color: var(--text-secondary, #344054);
-  border: 1px solid var(--border, #e5e9f2);
-  border-radius: 8px;
-  background: var(--surface, #ffffff);
-  font: inherit;
-}
-
-.pagination > div button {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  color: var(--text-secondary, #344054);
-  border: 1px solid var(--border, #e5e9f2);
-  border-radius: 8px;
-  background: var(--surface, #ffffff);
-  cursor: pointer;
-  place-items: center;
-}
-
-.pagination > div button:disabled {
-  opacity: 0.38;
-  cursor: not-allowed;
 }
 
 .drawerBackdrop,
@@ -835,10 +746,10 @@
   gap: 9px;
   margin: 16px 22px 0;
   padding: 11px 12px;
-  color: #175cd3;
-  border: 1px solid #b2ddff;
+  color: var(--info-strong);
+  border: 1px solid var(--info-border);
   border-radius: 10px;
-  background: #eff8ff;
+  background: var(--info-soft);
   font-size: 12.5px;
   line-height: 1.45;
 }
@@ -878,7 +789,7 @@
 }
 
 .fieldLabel b {
-  color: #d92d20;
+  color: var(--danger-solid);
 }
 
 .formControl {
@@ -938,7 +849,7 @@
 }
 
 .fieldHintError {
-  color: #b42318;
+  color: var(--danger-strong);
 }
 
 .emptyInline,
@@ -958,9 +869,9 @@
 }
 
 .formError {
-  color: #b42318;
-  border: 1px solid #fecdca;
-  background: #fef3f2;
+  color: var(--danger-strong);
+  border: 1px solid var(--danger-border);
+  background: var(--danger-soft);
 }
 
 .drawerFooter {
@@ -1019,7 +930,7 @@
   margin: 0;
   padding: 12px;
   overflow: auto;
-  color: #6941c6;
+  color: var(--purple-strong);
   border-radius: 8px;
   background: var(--surface-subtle, #f8fafc);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -1067,13 +978,13 @@
 }
 
 .warningIcon {
-  color: #b54708;
-  background: #fffaeb;
+  color: var(--warning-strong);
+  background: var(--warning-soft);
 }
 
 .dangerIcon {
-  color: #d92d20;
-  background: #fef3f2;
+  color: var(--danger-solid);
+  background: var(--danger-soft);
 }
 
 .confirmDialog p {
@@ -1111,58 +1022,6 @@
   from { transform: translateY(8px) scale(0.98); opacity: 0; }
 }
 
-:global(.dark) .readOnlyBadge {
-  color: #d2c1ff;
-  background: rgb(105 65 198 / 24%);
-}
-
-:global(.dark) .softDeleteBadge {
-  color: #9dcbff;
-  background: rgb(23 92 211 / 24%);
-}
-
-:global(.dark) .infoBanner,
-:global(.dark) .formNotice {
-  color: #9dcbff;
-  border-color: rgb(46 144 250 / 38%);
-  background: rgb(23 92 211 / 17%);
-}
-
-:global(.dark) .warningBanner {
-  color: #fde68a;
-  border-color: rgb(247 144 9 / 38%);
-  background: rgb(181 71 8 / 17%);
-}
-
-:global(.dark) .menuDanger:hover {
-  background: rgb(217 45 32 / 17%) !important;
-}
-
-:global(.dark) .badgeSuccess { color: #86efac; background: rgb(6 118 71 / 25%); }
-:global(.dark) .badgeDanger { color: #fda4af; background: rgb(180 35 24 / 25%); }
-:global(.dark) .badgeWarning { color: #fde68a; background: rgb(181 71 8 / 25%); }
-:global(.dark) .badgePurple { color: #d2c1ff; background: rgb(105 65 198 / 25%); }
-:global(.dark) .badgeNeutral { color: #d0d5dd; background: rgb(71 84 103 / 36%); }
-
-:global(.dark) .emptyTable > span {
-  border-color: rgb(46 125 246 / 34%);
-  background: rgb(27 107 243 / 16%);
-}
-
-:global(.dark) .tableError {
-  color: #fda4af;
-  background: rgb(180 35 24 / 17%);
-}
-
-:global(.dark) .formError {
-  color: #fda4af;
-  border-color: rgb(217 45 32 / 34%);
-  background: rgb(180 35 24 / 17%);
-}
-
-:global(.dark) .warningIcon { color: #fde68a; background: rgb(181 71 8 / 24%); }
-:global(.dark) .dangerIcon { color: #fda4af; background: rgb(180 35 24 / 24%); }
-
 @media (max-width: 900px) {
   .entityHeader,
   .tableToolbar {
@@ -1172,10 +1031,6 @@
 
   .headerActions > button {
     flex: 1;
-  }
-
-  .searchBox {
-    max-width: none;
   }
 
   .toolbarActions {
@@ -1191,8 +1046,6 @@
   .toolbarActions > * { flex: 1; }
   .columnPicker > div { right: auto; left: 0; }
   .tableMeta { padding-inline: 15px; overflow-x: auto; white-space: nowrap; }
-  .pagination { align-items: flex-start; flex-wrap: wrap; padding: 12px 14px; }
-  .pagination > span { order: 3; width: 100%; }
   .drawer { width: 100%; }
   .drawerHeader,
   .drawerFooter { padding-inline: 16px; }

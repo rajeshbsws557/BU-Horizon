@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -6,6 +8,7 @@ import '../data/university_bus_schedule_data.dart';
 import '../di/di.dart';
 import '../models/models.dart';
 import '../navigation/app_router.dart';
+import '../repositories/blood_repository.dart';
 import '../repositories/exam_repository.dart';
 import '../supabase/session_controller.dart';
 import '../theme/app_theme.dart';
@@ -60,7 +63,15 @@ class HomeScreen extends StatelessWidget {
                           onBell: () => context.go(AppRoutes.alerts),
                         ),
                       ),
-                      const SizedBox(height: 22),
+                      const SizedBox(height: 16),
+                      Entrance(
+                        index: 1,
+                        child: _LegalHelpCard(
+                          onTap: () => context.push(AppRoutes.legalHelp),
+                        ),
+                      ),
+                      const _UrgentBloodCard(),
+                      const SizedBox(height: 18),
                       GridView.builder(
                         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: isWide ? 4 : 2,
@@ -248,6 +259,264 @@ class _NotifBell extends StatelessWidget {
                   ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Prominent double-height card giving victims of cyber-bullying and
+/// harassment a direct path to request legal help.
+class _LegalHelpCard extends StatelessWidget {
+  final VoidCallback onTap;
+  const _LegalHelpCard({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final danger = context.colors.danger;
+    return Semantics(
+      button: true,
+      label: 'Report cyber-bullying and request legal help',
+      child: Pressable(
+        onTap: onTap,
+        child: Container(
+          height: 148,
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                danger.withValues(alpha: 0.22),
+                context.colors.primary.withValues(alpha: 0.10),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            border: Border.all(color: danger.withValues(alpha: 0.30)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  color: danger.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                ),
+                child: Icon(Icons.shield_rounded, color: danger, size: 30),
+              ),
+              const SizedBox(width: AppSpacing.lg),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Legal Help & Safety',
+                      style: TextStyle(
+                        color: context.colors.textPrimary,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      'Facing cyber-bullying or harassment? Report it confidentially '
+                      'and request legal help.',
+                      style: TextStyle(
+                        color: context.colors.textSecondary,
+                        fontSize: 12.5,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 9),
+                    Row(
+                      children: [
+                        Text(
+                          'Request help',
+                          style: TextStyle(
+                            color: danger,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.arrow_forward_rounded, color: danger, size: 16),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Home-screen spotlight for the currently-active urgent blood request.
+///
+/// Shows the oldest still-active urgent request (backed by the
+/// `active_urgent_blood_requests` view, which enforces the 6-hour window). When
+/// that request's window ends the card swaps to the next one, or hides when
+/// none remain. Collapses to nothing while loading or when there is none, so
+/// the slot below the Legal Help card takes no space unless there is something
+/// urgent to show. All urgent requests still appear in the Blood Help section.
+class _UrgentBloodCard extends StatefulWidget {
+  const _UrgentBloodCard();
+
+  @override
+  State<_UrgentBloodCard> createState() => _UrgentBloodCardState();
+}
+
+class _UrgentBloodCardState extends State<_UrgentBloodCard> {
+  BloodRequest? _request;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+    // Re-fetch periodically so the card advances when the active request's 6h
+    // window ends (the view drops it) and picks up newly-posted urgent requests.
+    _timer = Timer.periodic(const Duration(seconds: 60), (_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final request = await getIt<BloodRepository>().fetchActiveUrgentRequest();
+      if (mounted) setState(() => _request = request);
+    } catch (_) {
+      // Best-effort: a failed poll leaves the last-known state untouched.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final request = _request;
+    if (request == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Entrance(
+        index: 2,
+        child: _UrgentBloodCardBody(
+          request: request,
+          onTap: () => context.push(AppRoutes.blood),
+        ),
+      ),
+    );
+  }
+}
+
+/// Visual body of the urgent blood card — mirrors the urgent-need card in the
+/// Blood Help screen (blood gradient, white text) so it reads as the same
+/// affordance, and sits directly below the Legal Help & Safety card.
+class _UrgentBloodCardBody extends StatelessWidget {
+  final BloodRequest request;
+  final VoidCallback onTap;
+  const _UrgentBloodCardBody({required this.request, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      excludeSemantics: true,
+      label:
+          'Urgent blood needed. ${request.units} units of ${request.group.label} '
+          'at ${request.location}. Contact ${request.contact}. Posted ${request.time}. '
+          'Open Blood Help.',
+      child: Pressable(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          decoration: BoxDecoration(
+            gradient: context.colors.bloodGradient,
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            boxShadow: [
+              BoxShadow(
+                color: context.colors.danger.withValues(alpha: 0.35),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                ),
+                child: const Icon(Icons.water_drop_rounded,
+                    color: Colors.white, size: 30),
+              ),
+              const SizedBox(width: AppSpacing.lg),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Urgent: Blood Needed',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          request.time,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.85),
+                            fontSize: 11.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      '${request.units} unit${request.units == 1 ? '' : 's'} '
+                      '(${request.group.label}) · ${request.location}',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.95),
+                        fontSize: 12.5,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 9),
+                    const Row(
+                      children: [
+                        Text(
+                          'Respond now',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                          ),
+                        ),
+                        SizedBox(width: 4),
+                        Icon(Icons.arrow_forward_rounded,
+                            color: Colors.white, size: 16),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),

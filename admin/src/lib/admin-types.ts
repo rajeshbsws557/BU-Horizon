@@ -60,6 +60,7 @@ export type EntityGroupId =
   | "content"
   | "workflows"
   | "campus"
+  | "club"
   | "system";
 
 export interface EntityCapabilities {

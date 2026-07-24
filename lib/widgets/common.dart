@@ -3,6 +3,26 @@ import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 import 'motion.dart';
 
+/// Caps content width on wide viewports (web/desktop) and centers it, so
+/// screens don't stretch full-bleed the way [home_screen.dart] and
+/// [main_scaffold.dart] already avoid.
+class ResponsivePage extends StatelessWidget {
+  final Widget child;
+  final double maxWidth;
+
+  const ResponsivePage({super.key, required this.child, this.maxWidth = 720});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: child,
+      ),
+    );
+  }
+}
+
 /// Underline-style segmented tabs (All Routes / My Routes / Favorites, etc.).
 /// The active underline slides between tabs instead of snapping.
 class SegmentedTabs extends StatelessWidget {
@@ -112,45 +132,51 @@ class SearchField extends StatelessWidget {
 class PrimaryButton extends StatelessWidget {
   final String label;
   final IconData? icon;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   const PrimaryButton({super.key, required this.label, this.icon, required this.onPressed});
 
   @override
   Widget build(BuildContext context) {
-    return Pressable(
-      pressedScale: 0.98,
-      onTap: onPressed,
-      semanticLabel: label,
-      child: Container(
-        width: double.infinity,
-        height: 52,
-        decoration: BoxDecoration(
-          gradient: context.colors.blueGradient,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: context.colors.primary.withValues(alpha: 0.35),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (icon != null) ...[
-              Icon(icon, color: Colors.white, size: 20),
-              const SizedBox(width: 8),
-            ],
-            Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
-                fontSize: 15,
+    final disabled = onPressed == null;
+    return Opacity(
+      opacity: disabled ? 0.6 : 1.0,
+      child: Pressable(
+        pressedScale: disabled ? 1.0 : 0.98,
+        onTap: onPressed,
+        semanticLabel: label,
+        child: Container(
+          width: double.infinity,
+          height: 52,
+          decoration: BoxDecoration(
+            gradient: context.colors.blueGradient,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: disabled
+                ? const []
+                : [
+                    BoxShadow(
+                      color: context.colors.primary.withValues(alpha: 0.35),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+              ],
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

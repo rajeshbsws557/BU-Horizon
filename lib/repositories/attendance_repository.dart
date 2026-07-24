@@ -90,6 +90,10 @@ class AttendanceRosterMember {
 class AttendanceSessionDraft {
   final String offeringId;
   final String? sessionId;
+
+  /// When the session is being taken for a scheduled class, its id — the saved
+  /// session is linked back to the schedule so it shows as "attendance taken".
+  final String? scheduleId;
   final DateTime date;
   final String? startTime;
   final String? endTime;
@@ -101,6 +105,7 @@ class AttendanceSessionDraft {
     required this.date,
     required Map<String, AttendanceMark> records,
     this.sessionId,
+    this.scheduleId,
     this.startTime,
     this.endTime,
     this.topic = '',
