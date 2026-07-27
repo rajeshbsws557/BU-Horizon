@@ -60,9 +60,10 @@ class HomeScreen extends StatelessWidget {
                       Entrance(
                         index: 0,
                         child: _GreetingHero(
-                          onBell: () => context.go(AppRoutes.alerts),
+                          onBell: () => context.push(AppRoutes.notifications),
                         ),
                       ),
+
                       const SizedBox(height: 16),
                       Entrance(
                         index: 1,

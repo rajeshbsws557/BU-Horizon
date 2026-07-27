@@ -36,8 +36,12 @@ class AuthService {
   /// Emits on sign-in, sign-out, token refresh, etc.
   Stream<AuthState> get onAuthStateChange => _auth.onAuthStateChange;
 
-  /// Registers a new student. Auto-approved server-side (poll Q19); the profile
-  /// row is created by the `handle_new_user` trigger from this metadata.
+  /// Registers a new student. A normal (university-email) sign-up is
+  /// auto-approved (poll Q19). A [isProvisional] sign-up — used when a newly
+  /// admitted student does not yet have their @bu.ac.bd email — registers with
+  /// a personal email and lands as `pending_verification` for admin/CR
+  /// approval. Either way the profile row is created by the `handle_new_user`
+  /// trigger from this metadata.
   Future<AuthResponse> signUp({
     required String fullName,
     required String email,
@@ -48,6 +52,9 @@ class AuthService {
     String? facultyId,
     String? departmentId,
     String? batchId,
+    String? academicSystem,
+    int? currentTerm,
+    bool isProvisional = false,
   }) async {
     try {
       return await _auth.signUp(
@@ -61,12 +68,37 @@ class AuthService {
           if (facultyId != null) 'faculty_id': facultyId,
           if (departmentId != null) 'department_id': departmentId,
           if (batchId != null) 'batch_id': batchId,
+          if (academicSystem != null && academicSystem.isNotEmpty)
+            'academic_system': academicSystem,
+          if (currentTerm != null) 'current_term': currentTerm.toString(),
+          if (isProvisional) 'is_provisional': true,
         },
       );
+
     } on AuthException catch (e) {
       throw AuthFailure(e.message);
     }
   }
+
+  /// Starts adding/updating the university email on a provisional account.
+  ///
+  /// Supabase sends a confirmation link to the new @bu.ac.bd address. Only once
+  /// the user confirms it does Auth change the account email — a database
+  /// trigger then mirrors it onto the profile and promotes the account to fully
+  /// verified. This method just kicks off that confirmation.
+  Future<void> updateUniversityEmail(String universityEmail) async {
+    final email = universityEmail.trim().toLowerCase();
+    final re = RegExp(r'^[^@\s]+@bu\.ac\.bd$');
+    if (!re.hasMatch(email)) {
+      throw const AuthFailure('Use your @bu.ac.bd university email.');
+    }
+    try {
+      await _auth.updateUser(UserAttributes(email: email));
+    } on AuthException catch (e) {
+      throw AuthFailure(e.message);
+    }
+  }
+
 
   /// Signs in with an email or Student ID (poll Q22) plus password.
   Future<AuthResponse> signIn({

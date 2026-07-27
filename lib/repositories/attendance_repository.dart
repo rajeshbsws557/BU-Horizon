@@ -85,6 +85,73 @@ class AttendanceRosterMember {
   String get identifier => roll.isNotEmpty ? roll : studentId;
 }
 
+/// One class meeting in an attendance export (a CSV column).
+@immutable
+class AttendanceExportSession {
+  final String id;
+  final DateTime date;
+  final String? startTime;
+  final String? endTime;
+  final String topic;
+
+  const AttendanceExportSession({
+    required this.id,
+    required this.date,
+    this.startTime,
+    this.endTime,
+    this.topic = '',
+  });
+}
+
+/// One student's row in an attendance export: identity plus their mark for each
+/// exported session (null = not recorded for that session).
+@immutable
+class AttendanceExportStudent {
+  final String profileId;
+  final String fullName;
+  final String roll;
+  final String studentId;
+
+  /// Mark per session id. A missing/absent entry is treated as not-recorded.
+  final Map<String, AttendanceMark> marksBySession;
+
+  const AttendanceExportStudent({
+    required this.profileId,
+    required this.fullName,
+    required this.roll,
+    required this.studentId,
+    required this.marksBySession,
+  });
+
+  int presentIn(Iterable<AttendanceExportSession> sessions) => sessions
+      .where((s) => marksBySession[s.id] == AttendanceMark.present)
+      .length;
+
+  int recordedIn(Iterable<AttendanceExportSession> sessions) =>
+      sessions.where((s) => marksBySession.containsKey(s.id)).length;
+}
+
+/// Everything needed to write a clean per-course attendance CSV for a teacher.
+///
+/// When [sessions] holds a single meeting the export is a single-class report;
+/// otherwise it is the full record up to the moment of export.
+@immutable
+class AttendanceExportData {
+  final String courseCode;
+  final String courseTitle;
+  final String teacherName;
+  final List<AttendanceExportSession> sessions;
+  final List<AttendanceExportStudent> students;
+
+  const AttendanceExportData({
+    required this.courseCode,
+    required this.courseTitle,
+    required this.teacherName,
+    required this.sessions,
+    required this.students,
+  });
+}
+
 /// Complete payload for the atomic `cr_save_attendance` RPC.
 @immutable
 class AttendanceSessionDraft {
@@ -134,6 +201,15 @@ abstract interface class AttendanceRepository {
   /// Soft-deletes the class session. Reads exclude its attendance rows through
   /// the parent session's `deleted_at` filter.
   Future<void> deleteSession(String sessionId);
+
+  /// CR-only: pulls the full attendance record for a course offering so it can
+  /// be exported to CSV for the course teacher. When [sessionId] is given, only
+  /// that single class is included; otherwise every recorded class is included.
+  Future<AttendanceExportData> fetchExportData({
+    required String offeringId,
+    String? sessionId,
+  });
+
 
   /// Compatibility API retained for existing home/tests while callers move
   /// to offering-based summaries.
@@ -342,6 +418,64 @@ final class SampleAttendanceRepository implements AttendanceRepository {
   @override
   Future<void> deleteSession(String sessionId) async {
     _sessions.removeWhere((session) => session.id == sessionId);
+  }
+
+  @override
+  Future<AttendanceExportData> fetchExportData({
+    required String offeringId,
+    String? sessionId,
+  }) async {
+    const courses = {
+      'offering-cse-1101': (
+        'CSE-1101',
+        'Computer Fundamentals and Programming',
+      ),
+      'offering-cse-1102': ('CSE-1102', 'Discrete Mathematics'),
+      'offering-math-1101': ('MATH-1101', 'Differential and Integral Calculus'),
+    };
+    final meta = courses[offeringId] ?? ('COURSE', 'Course');
+
+    final matching = _sessions
+        .where((s) => s.offeringId == offeringId)
+        .where((s) => sessionId == null || s.id == sessionId)
+        .toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
+
+    final sessions = matching
+        .map(
+          (s) => AttendanceExportSession(
+            id: s.id,
+            date: s.date,
+            startTime: s.startTime,
+            endTime: s.endTime,
+            topic: s.topic,
+          ),
+        )
+        .toList();
+
+    final students = _members
+        .map(
+          (m) => AttendanceExportStudent(
+            profileId: m.profileId,
+            fullName: m.fullName,
+            roll: m.roll,
+            studentId: m.studentId,
+            marksBySession: {
+              for (final s in matching)
+                if (s.records[m.profileId] != null)
+                  s.id: s.records[m.profileId]!,
+            },
+          ),
+        )
+        .toList();
+
+    return AttendanceExportData(
+      courseCode: meta.$1,
+      courseTitle: meta.$2,
+      teacherName: '',
+      sessions: sessions,
+      students: students,
+    );
   }
 
   @override

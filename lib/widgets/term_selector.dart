@@ -7,17 +7,23 @@ class TermSelector extends StatelessWidget {
   final int? selectedTerm;
   final ValueChanged<int> onSelected;
 
+  /// Label for a single term unit, e.g. 'Semester' or 'Year'.
+  /// Defaults to 'Semester' for backward compatibility.
+  final String termLabel;
+
   const TermSelector({
     super.key,
     required this.terms,
     required this.selectedTerm,
     required this.onSelected,
+    this.termLabel = 'Semester',
   });
 
   @override
   Widget build(BuildContext context) {
-    if (terms.length <= 1) return const SizedBox.shrink();
+    if (terms.isEmpty) return const SizedBox.shrink();
     return SizedBox(
+
       height: 48,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
@@ -27,7 +33,7 @@ class TermSelector extends StatelessWidget {
           final term = terms[index];
           final isSelected = term == selectedTerm;
           return ChoiceChip(
-            label: Text('Semester $term'),
+            label: Text('$termLabel $term'),
             selected: isSelected,
             onSelected: (_) => onSelected(term),
             selectedColor: context.colors.primary.withValues(alpha: 0.15),

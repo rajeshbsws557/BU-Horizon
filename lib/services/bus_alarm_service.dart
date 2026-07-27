@@ -1,6 +1,8 @@
 // Developer Branding Watermark: Rajesh Biswas (rajeshbiswas.dev) - BU Horizon
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -59,10 +61,20 @@ class BusAlarmService {
   bool _initialized = false;
   static const String _prefKey = 'bu_horizon_scheduled_bus_alarms';
 
+  /// Scheduled OS alarms are a native-only capability. Flutter Web has no
+  /// equivalent to `zonedSchedule`, so the UI uses this to show a clear
+  /// "use the mobile app" message instead of silently failing.
+  bool get isSupported => !kIsWeb;
+
   Future<void> initialize() async {
-    if (_initialized) return;
+    if (_initialized || kIsWeb) return;
 
     tz_data.initializeTimeZones();
+    // `tz.local` defaults to UTC until a location is set. Anchor it to the
+    // device's real UTC offset so the ring time we compute in local wall-clock
+    // terms maps to the correct absolute instant. Bangladesh is UTC+6 with no
+    // DST, so a fixed-offset match is accurate for BU's users.
+    _configureLocalTimeZone();
 
     const androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -79,19 +91,42 @@ class BusAlarmService {
 
     await _notificationsPlugin.initialize(initSettings);
 
-    // Request permissions for Android 13+ (POST_NOTIFICATIONS)
-    if (!kIsWeb) {
-      final androidImplementation =
-          _notificationsPlugin.resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>();
-      if (androidImplementation != null) {
-        await androidImplementation.requestNotificationsPermission();
-        await androidImplementation.requestExactAlarmsPermission();
-      }
+    // Request permissions for Android 13+ (POST_NOTIFICATIONS) plus the
+    // exact-alarm permission required on Android 12+ to fire at a precise time.
+    final androidImplementation =
+        _notificationsPlugin.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    if (androidImplementation != null) {
+      await androidImplementation.requestNotificationsPermission();
+      await androidImplementation.requestExactAlarmsPermission();
     }
 
     _initialized = true;
   }
+
+  /// Picks a timezone whose current UTC offset matches the device, so
+  /// wall-clock ring times resolve to the right absolute moment.
+  void _configureLocalTimeZone() {
+    try {
+      final offset = DateTime.now().timeZoneOffset;
+      // Fast path for BU's region (UTC+6, Asia/Dhaka).
+      if (offset == const Duration(hours: 6)) {
+        tz.setLocalLocation(tz.getLocation('Asia/Dhaka'));
+        return;
+      }
+      // General fallback: find any location matching the current offset.
+      for (final location in tz.timeZoneDatabase.locations.values) {
+        final now = tz.TZDateTime.now(location);
+        if (now.timeZoneOffset == offset) {
+          tz.setLocalLocation(location);
+          return;
+        }
+      }
+    } catch (_) {
+      // Leave tz.local as-is; scheduling below still uses an absolute instant.
+    }
+  }
+
 
   /// Unique notification integer ID generated from trip string identifier.
   int _generateNotificationId(String idStr) {
@@ -145,9 +180,16 @@ class BusAlarmService {
     required String busName,
     required int leadMinutes,
   }) async {
+    if (kIsWeb) {
+      throw UnsupportedError(
+        'Bus alarms ring through your phone, so they need the BU Horizon '
+        'mobile app. Open it on Android or iOS to set this alarm.',
+      );
+    }
     await initialize();
 
     final departureTime = parseTripTimeToDateTime(tripTime);
+
     final ringTime = departureTime.subtract(Duration(minutes: leadMinutes));
     final now = DateTime.now();
 
@@ -163,6 +205,12 @@ class BusAlarmService {
 
     final notificationId = _generateNotificationId(tripId);
 
+    // NOTE: We deliberately do NOT set a custom RawResourceAndroidNotificationSound
+    // here. A previous version referenced 'notification' as a raw resource that
+    // does not exist in android/app/src/main/res/raw/, which made zonedSchedule
+    // throw — and the error was swallowed below, so the alarm was NEVER
+    // scheduled. Using the platform default alarm sound (playSound: true) is
+    // reliable and still uses the alarm audio channel via audioAttributesUsage.
     const androidDetails = AndroidNotificationDetails(
       'bu_horizon_bus_alarms',
       'Bus Departure Alarms',
@@ -170,12 +218,13 @@ class BusAlarmService {
           'High priority exact ringing alarms for university bus departures.',
       importance: Importance.max,
       priority: Priority.high,
-      sound: RawResourceAndroidNotificationSound('notification'),
+      playSound: true,
       audioAttributesUsage: AudioAttributesUsage.alarm,
       fullScreenIntent: true,
       category: AndroidNotificationCategory.alarm,
       ticker: 'BU Bus Departure Alarm',
     );
+
 
     const iosDetails = DarwinNotificationDetails(
       presentAlert: true,
@@ -206,11 +255,25 @@ class BusAlarmService {
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
       );
-    } catch (e) {
-      debugPrint('Fallback to standard schedule: $e');
+    } on PlatformException catch (e) {
+      // Exact-alarm permission can be revoked on Android 12+. Fall back to an
+      // inexact alarm so the reminder still fires (a minute early at worst)
+      // rather than not at all.
+      debugPrint('Exact alarm failed (${e.code}); retrying inexact: $e');
+      await _notificationsPlugin.zonedSchedule(
+        notificationId,
+        title,
+        body,
+        tzRingTime,
+        details,
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+      );
     }
 
     final alarmInfo = ScheduledBusAlarmInfo(
+
       id: tripId,
       routeName: routeName,
       departurePlace: departurePlace,

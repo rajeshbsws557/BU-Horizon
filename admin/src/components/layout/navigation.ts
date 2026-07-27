@@ -10,9 +10,11 @@ import {
   ScrollText,
   ShieldCheck,
   Sparkles,
+  UserCheck,
   Users,
   type LucideIcon,
 } from "lucide-react";
+
 
 export type NavigationItem = {
   label: string;
@@ -53,8 +55,15 @@ export const navigationGroups: NavigationGroup[] = [
         description: "Promote and manage class representatives",
         icon: ShieldCheck,
       },
+      {
+        label: "Approvals",
+        href: "/approvals",
+        description: "Review provisional student accounts",
+        icon: UserCheck,
+      },
     ],
   },
+
   {
     label: "Academic operations",
     items: [

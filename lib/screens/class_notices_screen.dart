@@ -14,6 +14,10 @@ import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/course_catalog.dart';
 import '../widgets/motion.dart';
+import '../widgets/pending_approval_view.dart';
+import '../widgets/term_history_sheet.dart';
+
+
 import 'exam_schedule_screen.dart';
 import 'resources_screen.dart';
 
@@ -33,8 +37,33 @@ class _ClassNoticesScreenState extends State<ClassNoticesScreen> {
   bool _mutating = false;
   List<CourseOffering> _courses = const [];
 
+  /// This screen owns term selection so the semester-history button can live in
+  /// the AppBar (top-right, just left of the "+" for CRs), per product spec.
+  int? _selectedTerm;
+
   bool get _canManage =>
       getIt<SessionController>().profile?.role.toLowerCase() == 'cr';
+
+  Future<void> _openHistory() async {
+    final profile = getIt<SessionController>().profile;
+    final termLabel = profile?.termLabel ?? 'Semester';
+    final currentTerm = profile?.currentTerm;
+    final availableTerms = CourseCatalogView.availableTermsFor(
+      courses: _courses,
+      currentTerm: currentTerm,
+    );
+    final picked = await showTermHistorySheet(
+      context,
+      availableTerms: availableTerms,
+      selectedTerm: _selectedTerm,
+      currentTerm: currentTerm,
+      termLabel: termLabel,
+    );
+    if (picked != null && mounted) {
+      setState(() => _selectedTerm = picked);
+    }
+  }
+
 
   @override
   void initState() {
@@ -47,8 +76,26 @@ class _ClassNoticesScreenState extends State<ClassNoticesScreen> {
     try {
       final courses = await _coursesRepository.fetchCourses();
       if (!mounted) return;
+      // This screen owns term selection (controlled mode), so CourseCatalogView
+      // will NOT auto-default the term for us. Initialize it to the student's
+      // current term here so notices for the current semester show by default —
+      // otherwise the list stays empty until a term is picked from history.
+      final currentTerm = getIt<SessionController>().profile?.currentTerm;
+      final availableTerms = CourseCatalogView.availableTermsFor(
+        courses: courses,
+        currentTerm: currentTerm,
+      );
       setState(() {
         _courses = courses;
+        // Only (re)initialize when unset or no longer valid; never overwrite a
+        // term the student deliberately picked from the history sheet.
+        if (_selectedTerm == null ||
+            !availableTerms.contains(_selectedTerm)) {
+          _selectedTerm =
+              currentTerm != null && availableTerms.contains(currentTerm)
+                  ? currentTerm
+                  : (availableTerms.isNotEmpty ? availableTerms.last : null);
+        }
         _loading = false;
       });
     } catch (_) {
@@ -57,6 +104,7 @@ class _ClassNoticesScreenState extends State<ClassNoticesScreen> {
       showToast(context, 'Could not load your batch courses');
     }
   }
+
 
   Future<void> _addCourse() async {
     final input = await showCourseEditorSheet(context);
@@ -139,6 +187,8 @@ class _ClassNoticesScreenState extends State<ClassNoticesScreen> {
       animation: getIt<SessionController>(),
       builder: (context, _) {
         final canManage = _canManage;
+        final isPending =
+            getIt<SessionController>().profile?.isPendingVerification == true;
         return Scaffold(
           appBar: AppBar(
             title: Text(
@@ -148,15 +198,29 @@ class _ClassNoticesScreenState extends State<ClassNoticesScreen> {
             backgroundColor: Colors.transparent,
             iconTheme: IconThemeData(color: context.colors.textPrimary),
             actions: [
-              if (canManage)
+              // Pending students can't browse batch content, so hide the
+              // history/add actions for them.
+              if (!isPending) ...[
+                // Semester history lives top-right per product spec — and, for a
+                // CR, immediately left of the "+" add button.
                 IconButton(
-                  onPressed: _mutating ? null : _addCourse,
-                  tooltip: 'Add course',
-                  icon: const Icon(Icons.add_rounded),
+                  onPressed: _openHistory,
+                  tooltip: 'Semester history',
+                  icon: const Icon(Icons.history_rounded),
                 ),
+                if (canManage)
+                  IconButton(
+                    onPressed: _mutating ? null : _addCourse,
+                    tooltip: 'Add course',
+                    icon: const Icon(Icons.add_rounded),
+                  ),
+              ],
             ],
           ),
-          body: CourseCatalogView(
+          body: isPending
+              ? const PendingApprovalView(featureName: 'class notices')
+              : CourseCatalogView(
+
             isLoading: _loading,
             canManage: canManage,
             courses: _courses,
@@ -166,6 +230,12 @@ class _ClassNoticesScreenState extends State<ClassNoticesScreen> {
             onOpen: _openCourse,
             onEdit: canManage ? _editCourse : null,
             onDelete: canManage ? _deleteCourse : null,
+            // Controlled term selection: the screen owns the term (defaulted to
+            // the student's current term in _loadCourses) and renders the
+            // history button in the AppBar, so the current semester's notices
+            // show by default without any manual selection.
+            selectedTerm: _selectedTerm,
+            onTermSelected: (term) => setState(() => _selectedTerm = term),
           ),
         );
       },

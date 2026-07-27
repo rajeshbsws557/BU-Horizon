@@ -7,7 +7,10 @@ import '../supabase/session_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/motion.dart';
-import '../widgets/term_selector.dart';
+import '../widgets/pending_approval_view.dart';
+import '../widgets/term_history_sheet.dart';
+
+
 
 /// The signed-in student's batch exam schedule (quizzes, midterms, finals).
 /// RLS scopes the query to the student's own batch.
@@ -91,19 +94,45 @@ class _ExamScheduleScreenState extends State<ExamScheduleScreen> {
     }
   }
 
+  List<int> _buildTermRange(int? currentTerm) {
+    final contentTerms = _exams.map((e) => e.termNumber ?? 1).toSet();
+    final max = [
+      if (currentTerm != null) currentTerm,
+      ...contentTerms,
+    ].fold(0, (a, b) => a > b ? a : b);
+    if (max == 0) return contentTerms.toList()..sort();
+    return List.generate(max, (i) => i + 1);
+  }
+
   @override
   Widget build(BuildContext context) {
     final canManage = _canManage;
-    
-    final availableTerms = _exams.map((e) => e.termNumber ?? 1).toSet().toList()..sort();
-    if (_selectedTerm == null || !availableTerms.contains(_selectedTerm)) {
-      _selectedTerm = getIt<SessionController>().profile?.currentTerm;
+    final profile = getIt<SessionController>().profile;
+    final termLabel = profile?.termLabel ?? 'Semester';
+    final currentTerm = profile?.currentTerm;
+    final isPending = profile?.isPendingVerification == true;
+
+    // Provisional students awaiting approval can't see their batch's exams.
+    if (isPending) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text('Exam Schedule',
+              style: TextStyle(color: context.colors.textPrimary)),
+          backgroundColor: Colors.transparent,
+          iconTheme: IconThemeData(color: context.colors.textPrimary),
+        ),
+        body: const PendingApprovalView(featureName: 'exam schedule'),
+      );
     }
-    if ((_selectedTerm == null || !availableTerms.contains(_selectedTerm)) && availableTerms.isNotEmpty) {
-      _selectedTerm = availableTerms.last;
+
+    final availableTerms = _buildTermRange(currentTerm);
+
+    if (_selectedTerm == null && availableTerms.isNotEmpty) {
+      _selectedTerm = currentTerm ?? availableTerms.last;
     }
-    
-    final filteredExams = _exams.where((e) => (e.termNumber ?? 1) == _selectedTerm).toList();
+    final selectedTerm = _selectedTerm ?? (availableTerms.isNotEmpty ? availableTerms.last : null);
+    final filteredExams = _exams.where((e) => (e.termNumber ?? 1) == selectedTerm).toList();
+
 
     return Scaffold(
       appBar: AppBar(
@@ -111,7 +140,26 @@ class _ExamScheduleScreenState extends State<ExamScheduleScreen> {
             style: TextStyle(color: context.colors.textPrimary)),
         backgroundColor: Colors.transparent,
         iconTheme: IconThemeData(color: context.colors.textPrimary),
+        actions: [
+          IconButton(
+            tooltip: 'View history',
+            icon: Icon(Icons.history_rounded, color: context.colors.textPrimary),
+            onPressed: () async {
+              final picked = await showTermHistorySheet(
+                context,
+                availableTerms: availableTerms,
+                selectedTerm: _selectedTerm,
+                currentTerm: currentTerm,
+                termLabel: termLabel,
+              );
+              if (picked != null && mounted) {
+                setState(() => _selectedTerm = picked);
+              }
+            },
+          ),
+        ],
       ),
+
       body: RefreshIndicator(
         color: context.colors.primary,
         backgroundColor: context.colors.surfaceAlt,
@@ -122,17 +170,9 @@ class _ExamScheduleScreenState extends State<ExamScheduleScreen> {
             : filteredExams.isEmpty && _exams.isNotEmpty
                 ? ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.all(16).copyWith(bottom: 0),
-                        child: TermSelector(
-                          terms: availableTerms,
-                          selectedTerm: _selectedTerm,
-                          onSelected: (term) => setState(() => _selectedTerm = term),
-                        ),
-                      ),
-                      const SizedBox(height: 120),
-                      const EmptyState(
+                    children: const [
+                      SizedBox(height: 120),
+                      EmptyState(
                         icon: Icons.edit_calendar_outlined,
                         title: 'No exams this term',
                         message: 'Your CR has not published any exam notices for this term yet.',
@@ -159,18 +199,28 @@ class _ExamScheduleScreenState extends State<ExamScheduleScreen> {
                     separatorBuilder: (_, index) => index == 0 ? const SizedBox.shrink() : const SizedBox(height: 12),
                     itemBuilder: (_, index) {
                       if (index == 0) {
-                        return availableTerms.isNotEmpty
+                        // The semester slider was removed; the current term
+                        // shows by default and past terms are reached through
+                        // the "View history" button in the AppBar. Show a small
+                        // banner only while browsing a past term.
+                        final onPast = selectedTerm != null &&
+                            selectedTerm != currentTerm;
+                        return onPast
                           ? Padding(
                               padding: const EdgeInsets.only(bottom: 16),
-                              child: TermSelector(
-                                terms: availableTerms,
-                                selectedTerm: _selectedTerm,
-                                onSelected: (term) => setState(() => _selectedTerm = term),
+                              child: _ExamViewingTermBanner(
+                                termLabel: termLabel,
+                                term: selectedTerm,
+                                onReturnToCurrent: currentTerm == null
+                                    ? null
+                                    : () => setState(
+                                          () => _selectedTerm = currentTerm,
+                                        ),
                               ),
                             )
                           : const SizedBox.shrink();
                       }
-                      
+
                       final i = index - 1;
                       return Entrance(
                         index: i,
@@ -183,6 +233,60 @@ class _ExamScheduleScreenState extends State<ExamScheduleScreen> {
                       );
                     },
                   ),
+      ),
+    );
+  }
+}
+
+/// Shown when a student is browsing a past term's exams (reached via the
+/// AppBar's "View history"). Replaces the old semester slider.
+class _ExamViewingTermBanner extends StatelessWidget {
+  final String termLabel;
+  final int term;
+  final VoidCallback? onReturnToCurrent;
+
+  const _ExamViewingTermBanner({
+    required this.termLabel,
+    required this.term,
+    this.onReturnToCurrent,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: context.colors.warning.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: context.colors.warning.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.history_rounded, size: 18, color: context.colors.warning),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Viewing a past $termLabel ($termLabel $term)',
+              style: TextStyle(
+                color: context.colors.textPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          if (onReturnToCurrent != null)
+            TextButton(
+              onPressed: onReturnToCurrent,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('Back to current'),
+            ),
+        ],
       ),
     );
   }

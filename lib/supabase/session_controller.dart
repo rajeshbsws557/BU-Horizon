@@ -24,17 +24,45 @@ class CurrentProfile {
   final String? batchStatus;
   final String role;
 
+  /// Account lifecycle status: 'active', 'pending_verification', 'suspended',
+  /// 'archived', 'deleted'. Provisional students awaiting approval are
+  /// 'pending_verification'.
+  final String status;
+
+  /// True when the student registered without a @bu.ac.bd email and their
+  /// identity is gated by admin/CR approval rather than the email domain.
+  final bool isProvisional;
+
+  /// The verified @bu.ac.bd address, once issued and confirmed. Null while the
+  /// account is still provisional.
+  final String? universityEmail;
+
+
+  /// The program's academic system: 'semester' or 'yearly' (poll Q2/Q3).
+  /// Drives whether the app labels a term as a "Semester" or a "Year".
+  final String? academicSystem;
+
+  /// Total number of terms in the program (e.g. 8 semesters, 4 years). Used to
+  /// know when advancing the batch will graduate it instead of moving a term.
+  final int? totalTerms;
+
   const CurrentProfile({
     required this.id,
     required this.fullName,
     required this.email,
     required this.role,
+    this.status = 'active',
+    this.isProvisional = false,
+    this.universityEmail,
     this.studentId,
     this.departmentName,
     this.batchId,
     this.currentTerm,
     this.batchStatus,
+    this.academicSystem,
+    this.totalTerms,
   });
+
 
   String get initials {
     final parts = fullName
@@ -45,7 +73,29 @@ class CurrentProfile {
     if (parts.length == 1) return parts.first[0].toUpperCase();
     return (parts.first[0] + parts.last[0]).toUpperCase();
   }
+
+  /// Singular label for one term in this program: 'Year' for yearly programs,
+  /// otherwise 'Semester'. Safe default keeps older data reading as semesters.
+  String get termLabel =>
+      academicSystem == 'yearly' ? 'Year' : 'Semester';
+
+  /// True when the batch is on its final term, so the next advance graduates it
+  /// rather than moving to another term.
+  bool get isFinalTerm =>
+      totalTerms != null && currentTerm != null && currentTerm! >= totalTerms!;
+
+  /// True when the batch has already graduated (no further advances allowed).
+  bool get hasGraduated => batchStatus == 'graduated';
+
+  /// True when the account is awaiting admin/CR approval of its identity.
+  bool get isPendingVerification => status == 'pending_verification';
+
+  /// True when the account is fully verified (has a confirmed @bu.ac.bd email
+  /// and is no longer provisional).
+  bool get isVerified => !isProvisional && universityEmail != null;
 }
+
+
 
 /// App-wide session state. Replaces the old `SampleData.isLoggedIn` notifier.
 /// Listens to Supabase auth changes and keeps the current profile loaded so the
@@ -141,6 +191,7 @@ class SessionController extends ChangeNotifier {
 
       final dept = row?['departments'] as Map<String, dynamic>?;
       final batch = row?['batches'] as Map<String, dynamic>?;
+      final program = batch?['programs'] as Map<String, dynamic>?;
       _profile = row == null
           ? null
           : CurrentProfile(
@@ -149,12 +200,24 @@ class SessionController extends ChangeNotifier {
               email: (row['email'] as String?) ?? user.email ?? '',
               studentId: row['student_id'] as String?,
               role: (row['role'] as String?) ?? 'student',
+              status: (row['status'] as String?) ?? 'active',
+              isProvisional: (row['is_provisional'] as bool?) ?? false,
+              universityEmail: row['university_email'] as String?,
               batchId: row['batch_id'] as String?,
-              currentTerm: batch?['current_term'] as int?,
+
+              // The student's own registration choices are the source of truth;
+              // fall back to the program/batch for profiles predating them.
+              currentTerm:
+                  (row['current_term'] as int?) ?? batch?['current_term'] as int?,
               batchStatus: batch?['status'] as String?,
               departmentName: dept?['name'] as String?,
+              academicSystem: (row['academic_system'] as String?) ??
+                  program?['academic_system'] as String?,
+              totalTerms: program?['total_terms'] as int?,
+
             );
       notifyListeners();
+
     } catch (_) {
       // Non-fatal: keep the session but leave profile details empty.
     }
@@ -178,8 +241,11 @@ class SessionController extends ChangeNotifier {
     return Supabase.instance.client
         .from('profiles')
         .select(
-          'id, full_name, email, student_id, role, batch_id, departments(name), batches(current_term, status)',
+          'id, full_name, email, student_id, role, status, is_provisional, university_email, batch_id, academic_system, current_term, departments(name), batches(current_term, status, programs(academic_system, total_terms))',
         )
+
+
+
         .eq('id', userId)
         .maybeSingle();
   }

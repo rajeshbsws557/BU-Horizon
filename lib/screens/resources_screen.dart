@@ -13,6 +13,8 @@ import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/course_catalog.dart';
 import '../widgets/motion.dart';
+import '../widgets/pending_approval_view.dart';
+
 
 /// Course-first resources for the signed-in student's batch.
 class ResourcesScreen extends StatefulWidget {
@@ -134,6 +136,8 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
       animation: getIt<SessionController>(),
       builder: (context, _) {
         final canManage = _canManage;
+        final isPending =
+            getIt<SessionController>().profile?.isPendingVerification == true;
         return Scaffold(
           appBar: AppBar(
             title: Text(
@@ -143,7 +147,7 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
             backgroundColor: Colors.transparent,
             iconTheme: IconThemeData(color: context.colors.textPrimary),
             actions: [
-              if (canManage)
+              if (canManage && !isPending)
                 IconButton(
                   onPressed: _mutating ? null : _addCourse,
                   tooltip: 'Add course',
@@ -151,7 +155,10 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
                 ),
             ],
           ),
-          body: CourseCatalogView(
+          body: isPending
+              ? const PendingApprovalView(featureName: 'resources')
+              : CourseCatalogView(
+
             isLoading: _loading,
             canManage: canManage,
             courses: _courses,

@@ -5,11 +5,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../di/di.dart';
 import '../navigation/app_router.dart';
+import '../supabase/auth_service.dart';
 import '../supabase/session_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/horizon_logo.dart';
+import '../widgets/status_dialog.dart';
 import '../widgets/theme_toggle.dart';
+
 
 /// Rendered as the "Profile" tab.
 class ProfileScreen extends StatelessWidget {
@@ -36,8 +39,146 @@ class _LoggedInView extends StatelessWidget {
   final CurrentProfile? profile;
   const _LoggedInView({this.profile});
 
+  /// Opens the "Add/update university email" step. Provisional students enter
+  /// their newly issued @bu.ac.bd address; Supabase sends a confirmation link,
+  /// and once confirmed a database trigger promotes the account to fully
+  /// verified.
+  Future<void> _showAddUniversityEmailSheet(BuildContext context) async {
+    final controller = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    var submitting = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.colors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, setModalState) {
+            Future<void> submit() async {
+              if (!(formKey.currentState?.validate() ?? false)) return;
+              setModalState(() => submitting = true);
+              try {
+                await getIt<AuthService>()
+                    .updateUniversityEmail(controller.text.trim());
+                if (!sheetContext.mounted) return;
+                Navigator.pop(sheetContext);
+                await showSuccessDialog(
+                  context,
+                  title: 'Confirm Your University Email',
+                  message: 'We sent a confirmation link to '
+                      '${controller.text.trim().toLowerCase()}. Open it from '
+                      'your @bu.ac.bd inbox to finish verifying. Your account '
+                      'becomes fully verified automatically once confirmed.',
+                  primaryLabel: 'Got it',
+                );
+              } on AuthFailure catch (e) {
+                if (sheetContext.mounted) {
+                  setModalState(() => submitting = false);
+                  showToast(sheetContext, e.message);
+                }
+              } catch (_) {
+                if (sheetContext.mounted) {
+                  setModalState(() => submitting = false);
+                  showToast(sheetContext, 'Could not update email. Try again.');
+                }
+              }
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 20,
+              ),
+              child: Form(
+                key: formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.mark_email_read_outlined,
+                            color: context.colors.primary),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Add University Email',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: context.colors.textPrimary,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Enter your official @bu.ac.bd email now that it has been '
+                      'issued. We\'ll send a confirmation link; once you confirm '
+                      'it, your account is upgraded to fully verified.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        height: 1.45,
+                        color: context.colors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    TextFormField(
+                      controller: controller,
+                      keyboardType: TextInputType.emailAddress,
+                      autofocus: true,
+                      style: TextStyle(color: context.colors.textPrimary),
+                      decoration: InputDecoration(
+                        hintText: 'name@bu.ac.bd',
+                        hintStyle: TextStyle(color: context.colors.textMuted),
+                        filled: true,
+                        fillColor: context.colors.surfaceAlt,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: context.colors.border),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: context.colors.border),
+                        ),
+                      ),
+                      validator: (v) {
+                        final value = (v ?? '').trim().toLowerCase();
+                        if (value.isEmpty) return 'Enter your university email';
+                        final re = RegExp(r'^[^@\s]+@bu\.ac\.bd$');
+                        if (!re.hasMatch(value)) {
+                          return 'Use your @bu.ac.bd university email';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 18),
+                    PrimaryButton(
+                      label: submitting
+                          ? 'Sending link...'
+                          : 'Send Confirmation Link',
+                      icon: Icons.send_rounded,
+                      onPressed: submitting ? null : submit,
+                    ),
+                    const SizedBox(height: 6),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+
     final name = profile?.fullName.isNotEmpty == true ? profile!.fullName : 'Student';
     final initials = profile?.initials ?? '?';
     final idAndEmail = [
@@ -46,22 +187,36 @@ class _LoggedInView extends StatelessWidget {
       if (profile?.email.isNotEmpty == true) profile!.email,
     ].join('  ·  ');
     final isCr = profile?.role.toLowerCase() == 'cr';
-    
+    final isAdmin = profile?.role.toLowerCase() == 'super_admin';
+    final isProvisional = profile?.isProvisional == true;
+    final isPending = profile?.isPendingVerification == true;
+
+    final termLabel = profile?.termLabel ?? 'Semester';
+
+
     Future<void> advanceBatch(BuildContext context) async {
       final term = profile?.currentTerm ?? 1;
-      final status = profile?.batchStatus;
-      if (status == 'graduated') {
+      if (profile?.hasGraduated == true) {
         showToast(context, 'This batch has already graduated.');
         return;
       }
+
+      // On the final term, advancing graduates the batch instead of moving to a
+      // next term (mirrors the advance_batch RPC), so the prompt must say so.
+      final isFinalTerm = profile?.isFinalTerm == true;
+      final title = isFinalTerm ? 'Graduate Batch?' : 'Advance Batch?';
+      final message = isFinalTerm
+          ? 'Your batch is on its final $termLabel ($term). Advancing will mark '
+                'the batch as graduated. This affects all students in the batch.'
+          : 'Are you sure you want to advance your batch to '
+                '$termLabel ${term + 1}? This will affect all students in the '
+                'batch.';
+
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Advance Batch?'),
-          content: Text(
-            'Are you sure you want to advance your batch to Semester ${term + 1}? '
-            'This will affect all students in the batch.',
-          ),
+          title: Text(title),
+          content: Text(message),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -69,7 +224,10 @@ class _LoggedInView extends StatelessWidget {
             ),
             TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Advance', style: TextStyle(color: Colors.red)),
+              child: Text(
+                isFinalTerm ? 'Graduate' : 'Advance',
+                style: const TextStyle(color: Colors.red),
+              ),
             ),
           ],
         ),
@@ -78,14 +236,21 @@ class _LoggedInView extends StatelessWidget {
       if (confirmed != true || !context.mounted) return;
 
       try {
-        await Supabase.instance.client.rpc('advance_batch', params: {'target_batch': profile?.batchId});
+        await Supabase.instance.client
+            .rpc('advance_batch', params: {'target_batch': profile?.batchId});
         if (!context.mounted) return;
-        showToast(context, 'Batch advanced successfully!');
+        showToast(
+          context,
+          isFinalTerm
+              ? 'Batch marked as graduated!'
+              : 'Batch advanced successfully!',
+        );
         await getIt<SessionController>().refresh();
       } catch (_) {
         if (context.mounted) showToast(context, 'Could not advance batch');
       }
     }
+
     
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -157,13 +322,32 @@ class _LoggedInView extends StatelessWidget {
             style: TextStyle(color: context.colors.textMuted, fontSize: 12),
           ),
         ),
-        const SizedBox(height: 28),
+        const SizedBox(height: 20),
+        if (isProvisional || isPending)
+          _ProvisionalBanner(
+            isPending: isPending,
+            onAddEmail: () => _showAddUniversityEmailSheet(context),
+          ),
+        const SizedBox(height: 8),
         const ThemeToggleRow(),
+        if (isProvisional)
+          _Tile(
+            icon: Icons.mark_email_read_outlined,
+            label: 'Add University Email',
+            onTap: () => _showAddUniversityEmailSheet(context),
+          ),
+        if (isCr || isAdmin)
+          _Tile(
+            icon: Icons.how_to_reg_outlined,
+            label: 'Account Approvals',
+            onTap: () => context.push(AppRoutes.accountApprovals),
+          ),
         _Tile(
           icon: Icons.edit_outlined,
           label: 'Edit Profile',
           onTap: () => showToast(context, 'Edit profile'),
         ),
+
         _Tile(
           icon: Icons.directions_bus_outlined,
           label: 'My Routes',
@@ -188,10 +372,13 @@ class _LoggedInView extends StatelessWidget {
           const SizedBox(height: 8),
           _Tile(
             icon: Icons.upgrade_rounded,
-            label: 'Advance Batch Semester',
+            label: profile?.isFinalTerm == true
+                ? 'Graduate Batch'
+                : 'Advance Batch $termLabel',
             onTap: () => advanceBatch(context),
             danger: true,
           ),
+
         ],
         const SizedBox(height: 8),
         _Tile(
@@ -309,11 +496,95 @@ class _LoggedOutView extends StatelessWidget {
   }
 }
 
+/// A prominent card shown to provisional / pending-verification students,
+/// explaining their state and offering the "add university email" shortcut.
+class _ProvisionalBanner extends StatelessWidget {
+  final bool isPending;
+  final VoidCallback onAddEmail;
+  const _ProvisionalBanner({required this.isPending, required this.onAddEmail});
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = isPending ? context.colors.warning : context.colors.primary;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: accent.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isPending
+                    ? Icons.hourglass_top_rounded
+                    : Icons.mark_email_unread_outlined,
+                color: accent,
+                size: 20,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  isPending
+                      ? 'Awaiting Approval'
+                      : 'Provisional Account',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: context.colors.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            isPending
+                ? 'Your account is under review by an admin or your class '
+                    'representative. You can keep exploring while you wait. '
+                    'Once your @bu.ac.bd email is issued, add it below to verify '
+                    'instantly.'
+                : 'You registered with a personal email. Add your @bu.ac.bd '
+                    'university email once it is issued to become fully '
+                    'verified.',
+            style: TextStyle(
+              fontSize: 13,
+              height: 1.45,
+              color: context.colors.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.icon(
+              onPressed: onAddEmail,
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Add University Email'),
+              style: FilledButton.styleFrom(
+                backgroundColor: accent,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _Tile extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
   final bool danger;
+
   const _Tile({
     required this.icon,
     required this.label,

@@ -3,8 +3,10 @@ import 'package:go_router/go_router.dart';
 
 import '../di/di.dart';
 import '../screens/about_screen.dart';
+import '../screens/account_approvals_screen.dart';
 import '../screens/alerts_screen.dart';
 import '../screens/attendance_screen.dart';
+
 import '../screens/blood_help_screen.dart';
 import '../screens/bus_schedule_screen.dart';
 import '../screens/class_notices_screen.dart';
@@ -15,6 +17,8 @@ import '../screens/legal_help_screen.dart';
 import '../screens/login_screen.dart';
 import '../screens/lost_found_screen.dart';
 import '../screens/main_scaffold.dart';
+import '../screens/notifications_screen.dart';
+
 import '../screens/people_search_screen.dart';
 import '../screens/profile_screen.dart';
 import '../screens/register_screen.dart';
@@ -44,6 +48,16 @@ abstract class AppRoutes {
   static const String login = '/login';
   static const String register = '/register';
   static const String splash = '/splash';
+
+  /// CR/admin queue to approve or reject provisional (pending_verification)
+  /// batchmates who registered without a university email.
+  static const String accountApprovals = '/account-approvals';
+
+  /// The notifications / activity hub opened from the home-screen bell. Hosts
+  /// action items (e.g. CR account approvals) and, in future, other alerts.
+  static const String notifications = '/notifications';
+
+
 
   /// Members-only sections. Guests can browse everything else without an
   /// account; only these need a signed-in session (product decision: guests
@@ -191,5 +205,16 @@ final GoRouter appRouter = GoRouter(
       path: AppRoutes.register,
       builder: (_, __) => const RegisterScreen(),
     ),
+    GoRoute(
+      path: AppRoutes.accountApprovals,
+      builder: (_, __) => const AccountApprovalsScreen(),
+    ),
+    GoRoute(
+      path: AppRoutes.notifications,
+      builder: (_, __) => const NotificationsScreen(),
+    ),
   ],
 );
+
+
+

@@ -10,6 +10,8 @@ import '../supabase/session_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/horizon_logo.dart';
+import '../widgets/status_dialog.dart';
+
 
 /// Registration collects the identity information required by the database
 /// (poll Q20): name, roll, Student ID, university email (@bu.ac.bd), phone,
@@ -39,7 +41,38 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _obscurePassword = true;
   bool _submitting = false;
 
+  /// Newly admitted students don't receive their @bu.ac.bd email for ~6 months.
+  /// When they tick "I don't have a University Mail yet", they register with a
+  /// personal email and land as a provisional (pending_verification) account
+  /// that a super admin or their batch CR approves.
+  bool _noUniversityEmail = false;
+
+
+  // Academic System (poll Q2/Q3): 'semester' (1st–8th) or 'yearly' (1st–4th).
+  // The chosen system and current term become the source of truth for the
+  // student's profile and drive how the app labels their terms.
+  String _academicSystem = 'semester';
+  int? _currentTerm;
+
+  /// Number of terms offered by the selected academic system.
+  int get _termCount => _academicSystem == 'yearly' ? 4 : 8;
+
+  /// Singular unit label for the selected system.
+  String get _termUnit => _academicSystem == 'yearly' ? 'Year' : 'Semester';
+
+  /// Ordinal like '1st', '2nd', '3rd', '4th' … for the dropdown labels.
+  String _ordinal(int n) {
+    if (n >= 11 && n <= 13) return '${n}th';
+    return switch (n % 10) {
+      1 => '${n}st',
+      2 => '${n}nd',
+      3 => '${n}rd',
+      _ => '${n}th',
+    };
+  }
+
   // Reference data for the dropdowns.
+
   List<FacultyOption> _faculties = [];
   List<DepartmentOption> _departments = [];
   String? _facultyId;
@@ -108,7 +141,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> _register() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     if (_facultyId == null || _departmentId == null) {
-      showToast(context, 'Please select your faculty and department');
+      showErrorDialog(
+        context,
+        title: 'Missing Details',
+        message: 'Please select your faculty and department to continue.',
+        primaryLabel: 'OK',
+      );
+      return;
+    }
+    if (_currentTerm == null) {
+      showErrorDialog(
+        context,
+        title: 'Missing Details',
+        message: 'Please choose your current ${_termUnit.toLowerCase()} to '
+            'continue.',
+        primaryLabel: 'OK',
+      );
       return;
     }
 
@@ -135,31 +183,68 @@ class _RegisterScreenState extends State<RegisterScreen> {
         facultyId: _facultyId,
         departmentId: departmentId,
         batchId: batchId,
+        academicSystem: _academicSystem,
+        currentTerm: _currentTerm,
+        isProvisional: _noUniversityEmail,
       );
       if (!mounted) return;
 
       // With email confirmation enabled there is no active session yet.
       if (response.session == null) {
-        showToast(
+        await showSuccessDialog(
           context,
-          'Account created. Check your email to confirm, then sign in.',
+          title: 'Account Created!',
+          message: _noUniversityEmail
+              ? 'Almost there — confirm your personal email from your inbox, '
+                  'then sign in. Your account will be reviewed by an admin or '
+                  'your class representative before it is fully activated.'
+              : 'Almost there — check your inbox to confirm your email, '
+                  'then sign in to BU Horizon.',
+          primaryLabel: 'Go to Sign In',
         );
+        if (!mounted) return;
         context.go(AppRoutes.login);
       } else {
         await getIt<SessionController>().refresh();
         if (!mounted) return;
-        showToast(context, 'Account created successfully!');
+        await showSuccessDialog(
+          context,
+          title: 'Welcome to BU Horizon!',
+          message: _noUniversityEmail
+              ? 'Your provisional account was created. An admin or your class '
+                  'representative will review it shortly. You can add your '
+                  '@bu.ac.bd email later from your profile to become fully '
+                  'verified.'
+              : 'Your account was created successfully. Let\'s get you '
+                  'started.',
+          primaryLabel: 'Continue',
+        );
+        if (!mounted) return;
         context.go(AppRoutes.home);
       }
+
     } on AuthFailure catch (e) {
-      if (mounted) showToast(context, e.message);
+      if (mounted) {
+        showErrorDialog(
+          context,
+          title: 'Registration Failed',
+          message: e.message,
+        );
+      }
     } catch (e) {
-      if (mounted)
-        showToast(context, 'Registration failed. Please try again later.');
+      if (mounted) {
+        showErrorDialog(
+          context,
+          title: 'Something Went Wrong',
+          message: 'We couldn\'t create your account right now. Please check '
+              'your connection and try again.',
+        );
+      }
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -364,7 +449,71 @@ class _RegisterScreenState extends State<RegisterScreen> {
     ),
   );
 
+  /// The "I don't have a University Mail yet" opt-in. Switches the email field
+  /// to accept a personal address and marks the sign-up as provisional.
+  Widget _buildNoUniversityEmailToggle(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: () =>
+                setState(() => _noUniversityEmail = !_noUniversityEmail),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: Checkbox(
+                      value: _noUniversityEmail,
+                      onChanged: (v) =>
+                          setState(() => _noUniversityEmail = v ?? false),
+                      materialTapTargetSize:
+                          MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      "I don't have a University Mail yet",
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        color: context.colors.textPrimary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_noUniversityEmail)
+            Padding(
+              padding: const EdgeInsets.only(top: 6, left: 34, right: 4),
+              child: Text(
+                'New students can register with a personal email. Your account '
+                'will be reviewed by an admin or your class representative, and '
+                'you can add your @bu.ac.bd email later to become fully '
+                'verified.',
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.4,
+                  color: context.colors.textSecondary,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   List<Widget> _buildFields(BuildContext context) {
+
     final textStyle = TextStyle(color: context.colors.textPrimary);
     return [
       _label(context, 'Full Name'),
@@ -394,15 +543,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
         validator: (v) =>
             (v == null || v.trim().isEmpty) ? 'Enter your class roll' : null,
       ),
-      _label(context, 'University Email'),
+      _label(context, _noUniversityEmail ? 'Personal Email' : 'University Email'),
       TextFormField(
         controller: _emailController,
         keyboardType: TextInputType.emailAddress,
         textInputAction: TextInputAction.next,
         style: textStyle,
-        decoration: _dec(context, 'name@bu.ac.bd'),
+        decoration: _dec(
+          context,
+          _noUniversityEmail ? 'name@gmail.com' : 'name@bu.ac.bd',
+        ),
         validator: (v) {
           final value = (v ?? '').trim().toLowerCase();
+          if (_noUniversityEmail) {
+            // Provisional students register with any valid personal email.
+            if (value.isEmpty) return 'Enter your personal email';
+            final any = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+            if (!any.hasMatch(value)) return 'Enter a valid email address';
+            return null;
+          }
           if (value.isEmpty) return 'Enter your university email';
           // Must be the university domain (poll Q20).
           final re = RegExp(r'^[^@\s]+@bu\.ac\.bd$');
@@ -410,7 +569,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
           return null;
         },
       ),
+      _buildNoUniversityEmailToggle(context),
       _label(context, 'Phone Number'),
+
       TextFormField(
         controller: _phoneController,
         keyboardType: TextInputType.phone,
@@ -443,7 +604,63 @@ class _RegisterScreenState extends State<RegisterScreen> {
           return null;
         },
       ),
+      _label(context, 'Academic System'),
+      SegmentedButton<String>(
+        style: SegmentedButton.styleFrom(
+          backgroundColor: context.colors.surfaceAlt,
+          foregroundColor: context.colors.textSecondary,
+          selectedForegroundColor: Colors.white,
+          selectedBackgroundColor: context.colors.primary,
+          side: BorderSide(color: context.colors.border),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        segments: const [
+          ButtonSegment(
+            value: 'semester',
+            label: Text('Semester'),
+            icon: Icon(Icons.calendar_view_week_rounded, size: 18),
+          ),
+          ButtonSegment(
+            value: 'yearly',
+            label: Text('Year'),
+            icon: Icon(Icons.calendar_today_rounded, size: 18),
+          ),
+        ],
+        selected: {_academicSystem},
+        onSelectionChanged: (selected) => setState(() {
+          _academicSystem = selected.first;
+          // Reset the dependent dropdown when the system changes so a stale
+          // value (e.g. 8th) can't survive a switch to yearly (max 4th).
+          _currentTerm = null;
+        }),
+      ),
+      _label(context, 'Choose $_termUnit'),
+      DropdownButtonFormField<int>(
+        key: ValueKey('term-$_academicSystem'),
+        initialValue: _currentTerm,
+        isExpanded: true,
+        style: textStyle,
+        dropdownColor: context.colors.surface,
+        decoration: _dec(
+          context,
+          'Select your current ${_termUnit.toLowerCase()}',
+        ),
+        items: List.generate(_termCount, (i) => i + 1)
+            .map(
+              (n) => DropdownMenuItem(
+                value: n,
+                child: Text('${_ordinal(n)} $_termUnit'),
+              ),
+            )
+            .toList(),
+        onChanged: (value) => setState(() => _currentTerm = value),
+        validator: (v) =>
+            v == null ? 'Select your current ${_termUnit.toLowerCase()}' : null,
+      ),
       _label(context, 'Faculty'),
+
       DropdownButtonFormField<String>(
         initialValue: _facultyId,
         isExpanded: true,

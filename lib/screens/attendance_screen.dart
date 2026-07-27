@@ -6,11 +6,15 @@ import '../models/course_offering.dart';
 import '../repositories/attendance_repository.dart';
 import '../repositories/class_schedule_repository.dart';
 import '../repositories/course_repository.dart';
+import '../services/attendance_export_service.dart';
 import '../supabase/session_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/motion.dart';
-import '../widgets/term_selector.dart';
+import '../widgets/pending_approval_view.dart';
+import '../widgets/term_history_sheet.dart';
+
+
 
 /// Course-first attendance for the signed-in student's department and batch.
 ///
@@ -73,24 +77,36 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       );
       if (!mounted) return;
       final currentTerm = _session.profile?.currentTerm;
-      final availableTerms =
-          courses.map((c) => c.termNumber ?? 1).toSet().toList()..sort();
+      // Terms the student can browse span the full range the batch has reached
+      // (1..currentTerm), merged with any term that actually has courses — not
+      // just terms that happen to have content. This keeps the selector and the
+      // history sheet showing every semester, including the freshly-advanced one
+      // that has no courses yet.
+      final contentTerms = courses.map((c) => c.termNumber ?? 1).toSet();
+      final maxTerm = [
+        if (currentTerm != null) currentTerm,
+        ...contentTerms,
+      ].fold(0, (a, b) => a > b ? a : b);
+      final availableTerms = maxTerm == 0
+          ? (contentTerms.toList()..sort())
+          : List.generate(maxTerm, (i) => i + 1);
       setState(() {
         _courses = courses;
         _availableTerms = availableTerms;
+        // Only (re)initialize the selection when it is unset or no longer valid.
+        // Never overwrite a term the student deliberately picked.
         if (_selectedTerm == null || !availableTerms.contains(_selectedTerm)) {
-          _selectedTerm = currentTerm;
-        }
-        if ((_selectedTerm == null ||
-                !availableTerms.contains(_selectedTerm)) &&
-            availableTerms.isNotEmpty) {
-          _selectedTerm = availableTerms.last;
+          _selectedTerm = currentTerm != null &&
+                  availableTerms.contains(currentTerm)
+              ? currentTerm
+              : (availableTerms.isNotEmpty ? availableTerms.last : null);
         }
         _summaries = {
           for (final summary in summaries) summary.offeringId: summary,
         };
         _loading = false;
       });
+
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -174,10 +190,27 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   @override
   Widget build(BuildContext context) {
     final profile = _session.profile;
+    final termLabel = profile?.termLabel ?? 'Semester';
     final scope = [
       if (profile?.departmentName?.isNotEmpty == true) profile!.departmentName!,
       if (profile?.batchId?.isNotEmpty == true) 'your batch',
     ].join(' • ');
+
+    // Provisional students awaiting approval cannot see their batch attendance.
+    if (profile?.isPendingVerification == true) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(
+            'Attendance',
+            style: TextStyle(color: context.colors.textPrimary),
+          ),
+          backgroundColor: Colors.transparent,
+          iconTheme: IconThemeData(color: context.colors.textPrimary),
+        ),
+        body: const PendingApprovalView(featureName: 'attendance records'),
+      );
+    }
+
 
     return Scaffold(
       appBar: AppBar(
@@ -187,8 +220,28 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         ),
         backgroundColor: Colors.transparent,
         iconTheme: IconThemeData(color: context.colors.textPrimary),
+        actions: [
+          IconButton(
+            tooltip: 'View history',
+            icon: Icon(Icons.history_rounded, color: context.colors.textPrimary),
+            onPressed: () async {
+              final picked = await showTermHistorySheet(
+                context,
+                availableTerms: _availableTerms,
+                selectedTerm: _selectedTerm,
+                currentTerm: profile?.currentTerm,
+                termLabel: termLabel,
+              );
+              if (picked != null && mounted) {
+                setState(() => _selectedTerm = picked);
+              }
+            },
+          ),
+        ],
       ),
+
       floatingActionButton: _isCr
+
           ? FloatingActionButton.extended(
               onPressed: _mutating ? null : () => _editCourse(),
               icon: const Icon(Icons.add_rounded),
@@ -209,16 +262,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               ? ListView(
                   physics: const AlwaysScrollableScrollPhysics(),
                   children: [
-                    TermSelector(
-                      terms: _availableTerms,
-                      selectedTerm: _selectedTerm,
-                      onSelected: (term) =>
-                          setState(() => _selectedTerm = term),
-                    ),
                     const SizedBox(height: 100),
                     EmptyState(
                       icon: Icons.menu_book_outlined,
                       title: 'No courses this term',
+
                       message: _isCr
                           ? 'Add a course for this term to start recording attendance.'
                           : 'Your CR has not added any courses for this term yet.',
@@ -259,12 +307,21 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (_availableTerms.isNotEmpty) ...[
-                            TermSelector(
-                              terms: _availableTerms,
-                              selectedTerm: _selectedTerm,
-                              onSelected: (term) =>
-                                  setState(() => _selectedTerm = term),
+                          // The semester slider was removed; the current term
+                          // shows by default and previous terms are reached
+                          // through the "View history" button in the AppBar.
+                          if (_availableTerms.isNotEmpty &&
+                              _selectedTerm != null &&
+                              _selectedTerm != profile?.currentTerm) ...[
+                            _ViewingTermBanner(
+                              termLabel: termLabel,
+                              term: _selectedTerm!,
+                              onReturnToCurrent: profile?.currentTerm == null
+                                  ? null
+                                  : () => setState(
+                                        () => _selectedTerm =
+                                            profile!.currentTerm,
+                                      ),
                             ),
                             const SizedBox(height: 16),
                           ],
@@ -299,6 +356,61 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   },
                 ),
         ),
+      ),
+    );
+  }
+}
+
+/// Shown when the student is browsing a past term (reached via the AppBar's
+/// "View history"). Makes it obvious they are not looking at the current term
+/// and offers a one-tap way back. Replaces the old semester slider.
+class _ViewingTermBanner extends StatelessWidget {
+  final String termLabel;
+  final int term;
+  final VoidCallback? onReturnToCurrent;
+
+  const _ViewingTermBanner({
+    required this.termLabel,
+    required this.term,
+    this.onReturnToCurrent,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: context.colors.warning.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: context.colors.warning.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.history_rounded, size: 18, color: context.colors.warning),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Viewing a past $termLabel ($termLabel $term)',
+              style: TextStyle(
+                color: context.colors.textPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          if (onReturnToCurrent != null)
+            TextButton(
+              onPressed: onReturnToCurrent,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('Back to current'),
+            ),
+        ],
       ),
     );
   }
@@ -683,6 +795,40 @@ class _CourseAttendanceScreenState extends State<_CourseAttendanceScreen> {
     }
   }
 
+  /// CR-only: export a clean CSV the course teacher can use. [session] limits
+  /// the export to a single class; when null the whole course is exported.
+  Future<void> _export([AttendanceSession? session]) async {
+    if (!_isCr) {
+      showToast(context, 'CR access is no longer active');
+      return;
+    }
+    // Let the user know work is happening — the query + file dialog can take a
+    // moment on large batches.
+    showToast(context, 'Preparing attendance CSV…');
+    try {
+      final data = await widget.repository.fetchExportData(
+        offeringId: widget.course.id,
+        sessionId: session?.id,
+      );
+      if (!mounted) return;
+      if (data.sessions.isEmpty) {
+        showToast(context, 'No recorded classes to export yet');
+        return;
+      }
+      final savedPath = await const AttendanceExportService()
+          .exportToFile(data);
+      if (!mounted) return;
+      showToast(
+        context,
+        savedPath == null
+            ? 'Export cancelled'
+            : 'Attendance CSV saved',
+      );
+    } catch (_) {
+      if (mounted) showToast(context, 'Could not export attendance');
+    }
+  }
+
   Future<void> _delete(AttendanceSession session) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -736,6 +882,16 @@ class _CourseAttendanceScreenState extends State<_CourseAttendanceScreen> {
                 ),
               ],
             ),
+            actions: [
+              // CR can export the whole course's attendance as a clean CSV to
+              // hand to the course teacher — available any time classes exist.
+              if (isCr && _sessions.isNotEmpty)
+                IconButton(
+                  tooltip: 'Export attendance (CSV)',
+                  icon: const Icon(Icons.download_rounded),
+                  onPressed: () => _export(),
+                ),
+            ],
           ),
           floatingActionButton: isCr
               ? FloatingActionButton.extended(
@@ -853,6 +1009,7 @@ class _CourseAttendanceScreenState extends State<_CourseAttendanceScreen> {
                                   isCr: isCr,
                                   onEdit: () => _openEditor(_sessions[index]),
                                   onDelete: () => _delete(_sessions[index]),
+                                  onExport: () => _export(_sessions[index]),
                                 ),
                               ),
                             ),
@@ -944,17 +1101,23 @@ class _AttendanceSummaryCard extends StatelessWidget {
 
 enum _SessionAction { edit, delete }
 
+// Session cards support a third action (export) that the schedule card does not,
+// so it uses its own tiny enum to keep the menus type-safe.
+enum _SessionCardAction { edit, exportCsv, delete }
+
 class _AttendanceSessionCard extends StatelessWidget {
   final AttendanceSession session;
   final bool isCr;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final VoidCallback onExport;
 
   const _AttendanceSessionCard({
     required this.session,
     required this.isCr,
     required this.onEdit,
     required this.onDelete,
+    required this.onExport,
   });
 
   @override
@@ -1064,19 +1227,29 @@ class _AttendanceSessionCard extends StatelessWidget {
             ),
           ),
           if (isCr)
-            PopupMenuButton<_SessionAction>(
+            PopupMenuButton<_SessionCardAction>(
               tooltip: 'Attendance actions',
               onSelected: (action) {
-                if (action == _SessionAction.edit) onEdit();
-                if (action == _SessionAction.delete) onDelete();
+                switch (action) {
+                  case _SessionCardAction.edit:
+                    onEdit();
+                  case _SessionCardAction.exportCsv:
+                    onExport();
+                  case _SessionCardAction.delete:
+                    onDelete();
+                }
               },
               itemBuilder: (_) => const [
                 PopupMenuItem(
-                  value: _SessionAction.edit,
+                  value: _SessionCardAction.edit,
                   child: Text('Edit attendance'),
                 ),
                 PopupMenuItem(
-                  value: _SessionAction.delete,
+                  value: _SessionCardAction.exportCsv,
+                  child: Text('Export this class (CSV)'),
+                ),
+                PopupMenuItem(
+                  value: _SessionCardAction.delete,
                   child: Text('Delete attendance'),
                 ),
               ],
@@ -1893,8 +2066,15 @@ class _CourseEditorDialogState extends State<_CourseEditorDialog> {
   late final TextEditingController _credit = TextEditingController(
     text: widget.course?.creditHours?.toString() ?? '',
   );
+  // New courses default to the CR's current registered term so they never
+  // silently land in the 1st semester; editing keeps the course's own term.
   late final TextEditingController _term = TextEditingController(
-    text: widget.course?.termNumber?.toString() ?? '',
+    text: (widget.course?.termNumber ??
+            (widget.course == null
+                ? getIt<SessionController>().profile?.currentTerm
+                : null))
+        ?.toString() ??
+        '',
   );
 
   @override

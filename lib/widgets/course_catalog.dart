@@ -7,7 +7,8 @@ import '../supabase/session_controller.dart';
 import '../theme/app_theme.dart';
 import 'common.dart';
 import 'motion.dart';
-import 'term_selector.dart';
+import 'term_history_sheet.dart';
+
 
 /// Shared course-first list used by class notices, resources and attendance.
 class CourseCatalogView extends StatefulWidget {
@@ -21,6 +22,13 @@ class CourseCatalogView extends StatefulWidget {
   final ValueChanged<CourseOffering>? onEdit;
   final ValueChanged<CourseOffering>? onDelete;
 
+  /// Controlled term selection. When [selectedTerm]/[onTermSelected] are
+  /// provided, the parent owns the selected term (e.g. it renders the semester
+  /// history button in its AppBar) and the view hides its own inline history
+  /// icon. Otherwise the view manages term selection internally.
+  final int? selectedTerm;
+  final ValueChanged<int>? onTermSelected;
+
   const CourseCatalogView({
     super.key,
     required this.isLoading,
@@ -32,26 +40,76 @@ class CourseCatalogView extends StatefulWidget {
     required this.onOpen,
     this.onEdit,
     this.onDelete,
+    this.selectedTerm,
+    this.onTermSelected,
   });
+
+  /// Terms a student can browse: the full range the batch has reached
+  /// (1..currentTerm) merged with any term that actually has courses. Shared so
+  /// a parent that owns term selection builds the exact same range.
+  static List<int> availableTermsFor({
+    required List<CourseOffering> courses,
+    required int? currentTerm,
+  }) {
+    final contentTerms = courses.map((c) => c.termNumber ?? 1).toSet();
+    final maxTerm = [
+      if (currentTerm != null) currentTerm,
+      ...contentTerms,
+    ].fold(0, (a, b) => a > b ? a : b);
+    return maxTerm == 0
+        ? (contentTerms.toList()..sort())
+        : List.generate(maxTerm, (i) => i + 1);
+  }
+
 
   @override
   State<CourseCatalogView> createState() => _CourseCatalogViewState();
 }
 
 class _CourseCatalogViewState extends State<CourseCatalogView> {
-  int? _selectedTerm;
+  int? _internalTerm;
+
+  /// True when the parent owns term selection (and renders the history button
+  /// itself, e.g. in the AppBar next to the "+").
+  bool get _controlled => widget.onTermSelected != null;
+
+  int? get _selectedTerm =>
+      _controlled ? widget.selectedTerm : _internalTerm;
+
+  void _selectTerm(int term) {
+    if (_controlled) {
+      widget.onTermSelected!(term);
+    } else {
+      setState(() => _internalTerm = term);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final availableTerms = widget.courses.map((c) => c.termNumber ?? 1).toSet().toList()..sort();
-    if (_selectedTerm == null || !availableTerms.contains(_selectedTerm)) {
-      _selectedTerm = getIt<SessionController>().profile?.currentTerm;
+    final profile = getIt<SessionController>().profile;
+    final termLabel = profile?.termLabel ?? 'Semester';
+    final currentTerm = profile?.currentTerm;
+    // Browsable terms span the full range the batch has reached (1..current)
+    // merged with any term that has courses — not just terms that have content.
+    // Otherwise a freshly-advanced term (with no courses yet) or an empty past
+    // term could never be selected.
+    final availableTerms = CourseCatalogView.availableTermsFor(
+      courses: widget.courses,
+      currentTerm: currentTerm,
+    );
+    // Only initialize the internal selection once (or when it falls out of
+    // range). Never overwrite a term the student deliberately picked. When the
+    // parent controls selection this is skipped entirely.
+    if (!_controlled &&
+        (_internalTerm == null || !availableTerms.contains(_internalTerm))) {
+      _internalTerm = currentTerm != null && availableTerms.contains(currentTerm)
+          ? currentTerm
+          : (availableTerms.isNotEmpty ? availableTerms.last : null);
     }
-    if ((_selectedTerm == null || !availableTerms.contains(_selectedTerm)) && availableTerms.isNotEmpty) {
-      _selectedTerm = availableTerms.last;
-    }
-    
+
     final filteredCourses = widget.courses.where((c) => (c.termNumber ?? 1) == _selectedTerm).toList();
+
+
 
     return RefreshIndicator(
       color: context.colors.primary,
@@ -64,12 +122,8 @@ class _CourseCatalogViewState extends State<CourseCatalogView> {
               ? ListView(
                   physics: const AlwaysScrollableScrollPhysics(),
                   children: [
-                    TermSelector(
-                      terms: availableTerms,
-                      selectedTerm: _selectedTerm,
-                      onSelected: (term) => setState(() => _selectedTerm = term),
-                    ),
                     const SizedBox(height: 120),
+
                     EmptyState(
                       icon: widget.emptyIcon,
                       title: 'No courses this term',
@@ -104,14 +158,36 @@ class _CourseCatalogViewState extends State<CourseCatalogView> {
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (availableTerms.isNotEmpty) ...[
-                            TermSelector(
-                              terms: availableTerms,
-                              selectedTerm: _selectedTerm,
-                              onSelected: (term) => setState(() => _selectedTerm = term),
+                          // The semester slider was removed by design: the app
+                          // shows the current term by default and students jump
+                          // to previous terms through the "View history" button.
+                          // When the parent owns term selection it renders that
+                          // button in its AppBar; otherwise we surface a small
+                          // inline one here so history stays reachable.
+                          if (!_controlled &&
+                              availableTerms.isNotEmpty &&
+                              _selectedTerm != null) ...[
+                            _TermHistoryBar(
+                              termLabel: termLabel,
+                              selectedTerm: _selectedTerm!,
+                              isCurrent: _selectedTerm == currentTerm,
+                              onTap: () async {
+                                final picked = await showTermHistorySheet(
+                                  context,
+                                  availableTerms: availableTerms,
+                                  selectedTerm: _selectedTerm,
+                                  currentTerm: profile?.currentTerm,
+                                  termLabel: termLabel,
+                                );
+                                if (picked != null && mounted) {
+                                  _selectTerm(picked);
+                                }
+                              },
                             ),
                             const SizedBox(height: 16),
                           ],
+
+
                           _CatalogIntro(
                             count: filteredCourses.length,
                             featureName: widget.featureName,
@@ -119,6 +195,7 @@ class _CourseCatalogViewState extends State<CourseCatalogView> {
                         ],
                       );
                     }
+
                     final course = filteredCourses[index - 1];
                     return Entrance(
                       index: index - 1,
@@ -187,6 +264,94 @@ class _CatalogIntro extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A compact "viewing <Term>" pill that opens the semester history sheet.
+/// This replaces the old inline semester slider: the current term shows by
+/// default and previous terms are reached through history.
+class _TermHistoryBar extends StatelessWidget {
+  final String termLabel;
+  final int selectedTerm;
+  final bool isCurrent;
+  final VoidCallback onTap;
+
+  const _TermHistoryBar({
+    required this.termLabel,
+    required this.selectedTerm,
+    required this.isCurrent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: context.colors.surfaceAlt,
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            border: Border.all(color: context.colors.border),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.history_rounded,
+                size: 18,
+                color: context.colors.primary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text.rich(
+                  TextSpan(
+                    text: 'Viewing ',
+                    style: TextStyle(
+                      color: context.colors.textSecondary,
+                      fontSize: 13,
+                    ),
+                    children: [
+                      TextSpan(
+                        text: '$termLabel $selectedTerm',
+                        style: TextStyle(
+                          color: context.colors.textPrimary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (isCurrent)
+                        TextSpan(
+                          text: '  •  Current',
+                          style: TextStyle(
+                            color: context.colors.success,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 12,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              Text(
+                'Change',
+                style: TextStyle(
+                  color: context.colors.primary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12.5,
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: context.colors.primary,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -459,7 +624,13 @@ class _CourseEditorSheetState extends State<_CourseEditorSheet> {
     _credits = TextEditingController(
       text: course?.creditHours?.toString().replaceFirst(RegExp(r'\.0$'), '') ?? '',
     );
-    _term = TextEditingController(text: course?.termNumber?.toString() ?? '');
+    // New courses default to the CR's current term so they never silently land
+    // in the 1st semester; editing keeps the course's own term.
+    final defaultTerm = course?.termNumber ??
+        (course == null
+            ? getIt<SessionController>().profile?.currentTerm
+            : null);
+    _term = TextEditingController(text: defaultTerm?.toString() ?? '');
     _teacher = TextEditingController(text: course?.teacherName ?? '');
   }
 

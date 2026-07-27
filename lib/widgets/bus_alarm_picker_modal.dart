@@ -1,9 +1,11 @@
 // Developer Branding Watermark: Rajesh Biswas (rajeshbiswas.dev) - BU Horizon
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../services/bus_alarm_service.dart';
 import '../theme/app_theme.dart';
+
 
 class BusAlarmPickerModal extends StatefulWidget {
   final String tripId;
@@ -223,7 +225,13 @@ class _BusAlarmPickerModalState extends State<BusAlarmPickerModal> {
             const Divider(height: 1),
             const SizedBox(height: 16),
 
-            if (_loading)
+            if (kIsWeb)
+              _WebUnsupportedNotice(
+                busName: widget.busName,
+                tripTime: widget.tripTime,
+              )
+            else if (_loading)
+
               const Center(
                 child: Padding(
                   padding: EdgeInsets.all(24),
@@ -535,3 +543,92 @@ class _BusAlarmPickerModalState extends State<BusAlarmPickerModal> {
     );
   }
 }
+
+/// Shown inside the picker on Flutter Web, where the OS-level scheduled alarm
+/// (`flutter_local_notifications.zonedSchedule`) has no implementation. Rather
+/// than let the user set an alarm that can never ring, we explain that the
+/// reminder needs the mobile app.
+class _WebUnsupportedNotice extends StatelessWidget {
+  final String busName;
+  final String tripTime;
+
+  const _WebUnsupportedNotice({required this.busName, required this.tripTime});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: context.colors.warning.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: context.colors.warning.withValues(alpha: 0.35),
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.phonelink_ring_rounded,
+                color: context.colors.warning,
+                size: 24,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Alarms need the mobile app',
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w800,
+                        color: context.colors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'A bus alarm rings on your phone even when the app is '
+                      'closed, so it can only be set from the BU Horizon '
+                      'Android or iOS app. Open the app to set an alarm for '
+                      '$busName ($tripTime).',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        height: 1.45,
+                        color: context.colors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        ElevatedButton.icon(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.check_rounded, size: 18, color: Colors.white),
+          label: const Text(
+            'Got it',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+              fontSize: 14,
+            ),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: context.colors.primary,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+

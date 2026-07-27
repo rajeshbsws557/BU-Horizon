@@ -572,6 +572,93 @@ final class SupabaseAttendanceRepository implements AttendanceRepository {
   }
 
   @override
+  Future<AttendanceExportData> fetchExportData({
+    required String offeringId,
+    String? sessionId,
+  }) async {
+    // Course identity (code/title/teacher) for the report header.
+    final offeringRow = await _client
+        .from('course_offerings')
+        .select('teacher_name, courses!inner(code, title)')
+        .eq('id', offeringId)
+        .single();
+    final course = offeringRow['courses'] as Map<String, dynamic>?;
+    final courseCode = (course?['code'] as String?) ?? '';
+    final courseTitle = (course?['title'] as String?) ?? '';
+    final teacherName = (offeringRow['teacher_name'] as String?) ?? '';
+
+    // The privacy-limited roster is the authoritative student list; RLS confirms
+    // the caller is the batch CR before this returns any rows.
+    final rosterRows =
+        await _client.rpc(
+              'get_batch_attendance_roster',
+              params: {'p_offering_id': offeringId},
+            )
+            as List<dynamic>;
+
+    // Sessions (a single class when sessionId is given, else the whole course).
+    var sessionQuery = _client
+        .from('class_sessions')
+        .select(
+          'id, session_date, start_time, end_time, topic, '
+          'attendance_records(student_id, status)',
+        )
+        .eq('offering_id', offeringId)
+        .isFilter('deleted_at', null);
+    if (sessionId != null) sessionQuery = sessionQuery.eq('id', sessionId);
+    final sessionRows = (await sessionQuery
+            .order('session_date', ascending: true)
+            .order('start_time', ascending: true))
+        .cast<Map<String, dynamic>>();
+
+    final sessions = <AttendanceExportSession>[];
+    // studentId -> (sessionId -> mark)
+    final marks = <String, Map<String, AttendanceMark>>{};
+    for (final row in sessionRows) {
+      final sid = row['id'] as String;
+      sessions.add(
+        AttendanceExportSession(
+          id: sid,
+          date: _sessionDate(row['session_date']),
+          startTime: row['start_time'] as String?,
+          endTime: row['end_time'] as String?,
+          topic: (row['topic'] as String?) ?? '',
+        ),
+      );
+      final records =
+          (row['attendance_records'] as List<dynamic>? ?? const [])
+              .cast<Map<String, dynamic>>();
+      for (final record in records) {
+        final mark = _mark(record['status'] as String?);
+        if (mark == null) continue;
+        final studentId = record['student_id'] as String;
+        (marks[studentId] ??= {})[sid] = mark;
+      }
+    }
+
+    final students = rosterRows.map((raw) {
+      final row = raw as Map<String, dynamic>;
+      final profileId = row['profile_id'] as String;
+      return AttendanceExportStudent(
+        profileId: profileId,
+        fullName: (row['full_name'] as String?) ?? '',
+        roll: (row['roll'] as String?) ?? '',
+        studentId: (row['student_id'] as String?) ?? '',
+        marksBySession: marks[profileId] ?? const {},
+      );
+    }).toList();
+
+    return AttendanceExportData(
+      courseCode: courseCode,
+      courseTitle: courseTitle,
+      teacherName: teacherName,
+      sessions: sessions,
+      students: students,
+    );
+  }
+
+
+  @override
   Future<List<CourseAttendance>> courseSummaries() async {
     final uid = _uid;
     if (uid == null) return const [];
