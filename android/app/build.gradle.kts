@@ -36,6 +36,16 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+
+            // Release builds run R8, which strips generic signatures. Gson (used
+            // by flutter_local_notifications to persist scheduled alarms) needs
+            // them, otherwise it throws "Missing type parameter." and the bus
+            // alarm both fails to save and crashes the app when it comes due.
+            // Without this wiring proguard-rules.pro is never applied.
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }

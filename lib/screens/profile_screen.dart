@@ -9,6 +9,7 @@ import '../supabase/auth_service.dart';
 import '../supabase/session_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/home_cards_customizer.dart';
 import '../widgets/horizon_logo.dart';
 import '../widgets/status_dialog.dart';
 import '../widgets/theme_toggle.dart';
@@ -330,6 +331,8 @@ class _LoggedInView extends StatelessWidget {
           ),
         const SizedBox(height: 8),
         const ThemeToggleRow(),
+        const ThemeSelectorSection(),
+        const SizedBox(height: 12),
         if (isProvisional)
           _Tile(
             icon: Icons.mark_email_read_outlined,
@@ -346,6 +349,11 @@ class _LoggedInView extends StatelessWidget {
           icon: Icons.edit_outlined,
           label: 'Edit Profile',
           onTap: () => showToast(context, 'Edit profile'),
+        ),
+        _Tile(
+          icon: Icons.dashboard_customize_outlined,
+          label: 'Customize Home Cards',
+          onTap: () => showHomeCardsCustomizer(context),
         ),
 
         _Tile(
@@ -442,6 +450,7 @@ class _LoggedOutView extends StatelessWidget {
                   ),
                   const SizedBox(height: 24),
                   const ThemeToggleRow(),
+                  const ThemeSelectorSection(),
                   const SizedBox(height: 16),
                   GlassCard(
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),

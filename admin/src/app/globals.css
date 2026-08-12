@@ -242,11 +242,11 @@ a {
 .auth-logo {
   width: 58px;
   height: 58px;
-  padding: 3px;
+  padding: 2px;
   border: 1px solid var(--border);
-  border-radius: 18px;
+  border-radius: 50%;
   background: white;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .auth-brand-name {
@@ -575,10 +575,10 @@ a {
   width: 44px;
   height: 44px;
   flex: 0 0 auto;
-  padding: 2px;
-  border-radius: 13px;
+  padding: 1px;
+  border-radius: 50%;
   background: white;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .sidebar-brand {

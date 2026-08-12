@@ -35,14 +35,14 @@ class BusMapRouteData {
 }
 
 class BarishalBusRouteCoordinates {
-  static const LatLng buCampusPoint = LatLng(22.6581, 90.3552);
+  static const LatLng buCampusPoint = LatLng(22.6600, 90.3633);
 
   // Main Bus Stops in Barishal City
   static const BusStopLocation buCampus = BusStopLocation(
     id: 'bu_campus',
-    name: 'বিশ্ববিদ্যালয় (BU Campus)',
+    name: 'বিশ্ববিদ্যালয় (BU Campus)',
     englishName: 'Barishal University Main Gate',
-    point: LatLng(22.6581, 90.3552),
+    point: LatLng(22.6600, 90.3633),
     description: 'Main Campus Terminal & Drop-off Point',
   );
 
@@ -98,7 +98,7 @@ class BarishalBusRouteCoordinates {
     id: 'tolghat',
     name: 'টোলঘর',
     englishName: 'Tolghat Bridge',
-    point: LatLng(22.6610, 90.3545),
+    point: LatLng(22.6633, 90.3547),
     description: 'Kirtonkhola river bridge toll gate',
   );
 
@@ -196,8 +196,8 @@ class BarishalBusRouteCoordinates {
         LatLng(22.6800, 90.3580), // Amtala Mor
         LatLng(22.6710, 90.3520), // Rupatali Housing
         LatLng(22.6650, 90.3535), // Kathaltala
-        LatLng(22.6610, 90.3545), // Tolghat
-        LatLng(22.6581, 90.3552), // BU Campus
+        LatLng(22.6633, 90.3547), // Tolghat
+        LatLng(22.6600, 90.3633), // BU Campus
       ],
       keyStops: const [
         barishalClub,
@@ -221,8 +221,8 @@ class BarishalBusRouteCoordinates {
         LatLng(22.6910, 90.3590), // Bottolar Mor
         LatLng(22.6780, 90.3560), // Korimkutir
         LatLng(22.6650, 90.3535), // Kathaltala
-        LatLng(22.6610, 90.3545), // Tolghat
-        LatLng(22.6581, 90.3552), // BU Campus
+        LatLng(22.6633, 90.3547), // Tolghat
+        LatLng(22.6600, 90.3633), // BU Campus
       ],
       keyStops: const [
         nutanBazar,
@@ -248,8 +248,8 @@ class BarishalBusRouteCoordinates {
         LatLng(22.6800, 90.3580), // Amtala Mor
         LatLng(22.6710, 90.3520), // Rupatali Housing
         LatLng(22.6650, 90.3535), // Kathaltala
-        LatLng(22.6610, 90.3545), // Tolghat
-        LatLng(22.6581, 90.3552), // BU Campus
+        LatLng(22.6633, 90.3547), // Tolghat
+        LatLng(22.6600, 90.3633), // BU Campus
       ],
       keyStops: const [
         nathullabad,
@@ -271,8 +271,8 @@ class BarishalBusRouteCoordinates {
       pathPoints: const [
         LatLng(22.7000, 90.3570), // Choumatha
         LatLng(22.6800, 90.3580), // Amtala
-        LatLng(22.6610, 90.3545), // Tolghat
-        LatLng(22.6581, 90.3552), // BU Campus
+        LatLng(22.6633, 90.3547), // Tolghat
+        LatLng(22.6600, 90.3633), // BU Campus
       ],
       keyStops: const [
         choumatha,

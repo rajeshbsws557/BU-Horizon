@@ -1,42 +1,53 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
-import '../data/sample_data.dart';
-import '../data/university_bus_schedule_data.dart';
+import '../bloc/home_cards_cubit.dart';
+import '../data/home_cards.dart';
 import '../di/di.dart';
 import '../models/models.dart';
 import '../navigation/app_router.dart';
 import '../repositories/blood_repository.dart';
-import '../repositories/exam_repository.dart';
 import '../supabase/session_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/home_cards_customizer.dart';
 import '../widgets/login_gate.dart';
 import '../widgets/motion.dart';
 import '../widgets/theme_toggle.dart';
+import '../widgets/upcoming_section.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
-  void _open(BuildContext context, QuickAction a) {
-    if (a.route.isEmpty) {
-      showToast(context, '${a.title} opened');
+  void _open(BuildContext context, HomeCard card) {
+    if (card.route.isEmpty) {
+      showToast(context, '${card.title} opened');
       return;
     }
-    // '/people' lives on the Search tab rather than a pushable route.
-    final target = a.route == '/people' ? AppRoutes.search : a.route;
+    final target = card.route;
     if (AppRoutes.membersOnly.contains(target) &&
-        !requireSignIn(context, a.title)) {
+        !requireSignIn(context, card.title)) {
       return;
     }
-    if (target == AppRoutes.search) {
+    // The tab destinations (Clubs / Alerts) live in the shell's branches, so
+    // switch branches instead of stacking a new route. Everything else is a
+    // top-level route and must be *pushed* — using `go` on those would replace
+    // the whole stack, leaving nothing to pop back to (back would exit the app).
+    if (_isTabRoute(target)) {
       context.go(target);
     } else {
       context.push(target);
     }
   }
+
+  static bool _isTabRoute(String route) => const {
+        AppRoutes.club,
+        AppRoutes.alerts,
+      }.contains(route);
+
 
   @override
   Widget build(BuildContext context) {
@@ -72,49 +83,58 @@ class HomeScreen extends StatelessWidget {
                         ),
                       ),
                       const _UrgentBloodCard(),
-                      const SizedBox(height: 18),
-                      GridView.builder(
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: isWide ? 4 : 2,
-                          mainAxisSpacing: 12,
-                          crossAxisSpacing: 12,
-                          mainAxisExtent: 110 *
-                              MediaQuery.textScalerOf(context)
-                                  .scale(1.0)
-                                  .clamp(1.0, 1.6),
+                      const SizedBox(height: 22),
+                      Entrance(
+                        index: 3,
+                        child: _QuickAccessHeader(
+                          onCustomize: () => showHomeCardsCustomizer(context),
                         ),
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: SampleData.quickActions.length,
-                        itemBuilder: (context, i) {
-                          final a = SampleData.quickActions[i];
-                          return Entrance(
-                            index: 1 + i,
-                            child: _ActionCard(
-                              action: a,
-                              onTap: () => _open(context, a),
+                      ),
+                      const SizedBox(height: 12),
+                      // Only the student's pinned cards render here — two by
+                      // default (Class Notices + Bus Schedule); the rest are
+                      // opt-in through the customizer.
+                      BlocBuilder<HomeCardsCubit, List<HomeCard>>(
+                        builder: (context, cards) {
+                          if (cards.isEmpty) {
+                            return _NoCardsCard(
+                              onCustomize: () =>
+                                  showHomeCardsCustomizer(context),
+                            );
+                          }
+                          return GridView.builder(
+                            gridDelegate:
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: isWide ? 4 : 2,
+                              mainAxisSpacing: 12,
+                              crossAxisSpacing: 12,
+                              mainAxisExtent: 110 *
+                                  MediaQuery.textScalerOf(context)
+                                      .scale(1.0)
+                                      .clamp(1.0, 1.6),
                             ),
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: cards.length,
+                            itemBuilder: (context, i) {
+                              final card = cards[i];
+                              return Entrance(
+                                key: ValueKey('home-card-${card.id}'),
+                                index: 3 + i,
+                                child: _ActionCard(
+                                  card: card,
+                                  onTap: () => _open(context, card),
+                                ),
+                              );
+                            },
                           );
                         },
                       ),
                       const SizedBox(height: 26),
-                      const Entrance(index: 7, child: _SectionTitle('Upcoming')),
-                      const SizedBox(height: 12),
-                      const Entrance(index: 8, child: _NextBusCard()),
-                      const SizedBox(height: 10),
-                      Entrance(
-                        index: 9,
-                        child: ListenableBuilder(
-                          listenable: getIt<SessionController>(),
-                          builder: (context, _) =>
-                              getIt<SessionController>().isSignedIn
-                                  ? const _NextExamCard()
-                                  : _SignInInviteCard(
-                                      onSignIn: () =>
-                                          context.push(AppRoutes.login),
-                                    ),
-                        ),
-                      ),
+                      // Hero + compact rows: the next departure carries a live
+                      // countdown, so the section stays correct while the
+                      // student is looking at it.
+                      const UpcomingSection(),
                     ],
                   ),
                 ),
@@ -282,7 +302,9 @@ class _LegalHelpCard extends StatelessWidget {
       child: Pressable(
         onTap: onTap,
         child: Container(
-          height: 148,
+          // A fixed height clipped the body copy on narrow phones (it wraps to
+          // more lines there), so grow past the design height when needed.
+          constraints: const BoxConstraints(minHeight: 148),
           padding: const EdgeInsets.all(AppSpacing.lg),
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -310,6 +332,7 @@ class _LegalHelpCard extends StatelessWidget {
               const SizedBox(width: AppSpacing.lg),
               Expanded(
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -525,17 +548,147 @@ class _UrgentBloodCardBody extends StatelessWidget {
   }
 }
 
-class _ActionCard extends StatelessWidget {
-  final QuickAction action;
-  final VoidCallback onTap;
-  const _ActionCard({required this.action, required this.onTap});
+/// "Quick Access" section title with the entry point to the card customizer.
+class _QuickAccessHeader extends StatelessWidget {
+  final VoidCallback onCustomize;
+  const _QuickAccessHeader({required this.onCustomize});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Expanded(child: _SectionTitle('Quick Access')),
+        Semantics(
+          button: true,
+          label: 'Customize home cards',
+          child: Tooltip(
+            message: 'Add or reorder cards',
+            child: Material(
+              color: context.colors.surfaceAlt,
+              borderRadius: BorderRadius.circular(10),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: onCustomize,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: context.colors.border),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.dashboard_customize_rounded,
+                        size: 16,
+                        color: context.colors.primary,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Customize',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: context.colors.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Shown when the student has removed every card, so the section still has an
+/// obvious way back rather than silently collapsing.
+class _NoCardsCard extends StatelessWidget {
+  final VoidCallback onCustomize;
+  const _NoCardsCard({required this.onCustomize});
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      label: action.title,
-      hint: action.subtitle,
+      label: 'No quick cards. Add cards to your home screen.',
+      child: Pressable(
+        onTap: onCustomize,
+        child: Container(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          decoration: BoxDecoration(
+            color: context.colors.surfaceAlt,
+            borderRadius: BorderRadius.circular(AppRadii.card),
+            border: Border.all(
+              color: context.colors.primary.withValues(alpha: 0.35),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: context.colors.primary.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.add_rounded,
+                  color: context.colors.primary,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Add your cards',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: context.colors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Pick the shortcuts you want on your home screen.',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        height: 1.35,
+                        color: context.colors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: context.colors.textMuted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A single pinned quick card in the home grid.
+class _ActionCard extends StatelessWidget {
+  final HomeCard card;
+  final VoidCallback onTap;
+  const _ActionCard({required this.card, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    // The catalog stores AppColorToken sentinels; resolve to the live theme.
+    final actionColor = context.colors.resolve(card.color);
+    return Semantics(
+      button: true,
+      label: card.title,
+      hint: card.subtitle,
       child: Pressable(
         onTap: onTap,
         child: Container(
@@ -545,10 +698,7 @@ class _ActionCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(AppRadii.card),
             border: Border.all(color: context.colors.border),
           ),
-          child: Builder(builder: (context) {
-            // Sample data stores AppColorToken sentinels; resolve to live theme.
-            final actionColor = context.colors.resolve(action.color);
-            return Column(
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -559,11 +709,11 @@ class _ActionCard extends StatelessWidget {
                   color: actionColor.withValues(alpha: 0.16),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(action.icon, color: actionColor, size: 20),
+                child: Icon(card.icon, color: actionColor, size: 20),
               ),
               const SizedBox(height: 8),
               Text(
-                action.title,
+                card.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -574,7 +724,7 @@ class _ActionCard extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                action.subtitle,
+                card.subtitle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -583,8 +733,7 @@ class _ActionCard extends StatelessWidget {
                 ),
               ),
             ],
-          );
-          }),
+          ),
         ),
       ),
     );
@@ -605,194 +754,3 @@ class _SectionTitle extends StatelessWidget {
       );
 }
 
-class _UpcomingCard extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String time;
-  final String? badge;
-  final VoidCallback? onTap;
-  const _UpcomingCard({
-    required this.icon,
-    required this.title,
-    required this.time,
-    this.badge,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      label: '$title at $time${badge != null ? ', $badge' : ''}',
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: context.colors.surfaceAlt,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: context.colors.border),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14.5,
-                          color: context.colors.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        time,
-                        style: TextStyle(
-                          color: context.colors.textSecondary,
-                          fontSize: 12.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (badge != null)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: context.colors.primary.withValues(alpha: 0.16),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      badge!,
-                      style: TextStyle(
-                        color: context.colors.primary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  )
-                else
-                  Icon(icon, color: context.colors.textMuted),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// The next student-bus departure, computed live from the official BU
-/// timetable (`university_bus_schedule_data.dart` — the canonical source;
-/// the database does not carry the timetable yet).
-class _NextBusCard extends StatelessWidget {
-  const _NextBusCard();
-
-  static DateTime? _tripTime(String raw, DateTime now) {
-    final m = RegExp(r'^(\d{1,2}):(\d{2})\s*(AM|PM)$', caseSensitive: false)
-        .firstMatch(raw.trim());
-    if (m == null) return null;
-    var hour = int.parse(m.group(1)!) % 12;
-    if (m.group(3)!.toUpperCase() == 'PM') hour += 12;
-    return DateTime(now.year, now.month, now.day, hour, int.parse(m.group(2)!));
-  }
-
-  /// Earliest departure at or after [now] across all student routes.
-  static ({String route, String place, String time})? _next(DateTime now) {
-    final student = UniversityBusScheduleData.categories.firstWhere(
-      (c) => c.title == 'Student',
-      orElse: () => UniversityBusScheduleData.categories.first,
-    );
-    DateTime? best;
-    ({String route, String place, String time})? found;
-    for (final route in student.routes) {
-      for (final section in route.departureSections) {
-        for (final trip in section.trips) {
-          final t = _tripTime(trip.time, now);
-          if (t == null || t.isBefore(now)) continue;
-          if (best == null || t.isBefore(best)) {
-            best = t;
-            found = (
-              route: route.routeName,
-              place: section.departurePlace,
-              time: trip.time,
-            );
-          }
-        }
-      }
-    }
-    return found;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final next = _next(DateTime.now());
-    return _UpcomingCard(
-      icon: Icons.directions_bus_rounded,
-      title: next == null
-          ? 'BU Bus Schedule'
-          : 'BU Bus Schedule · Student ${next.route}',
-      time: next == null
-          ? 'No more trips today — service resumes in the morning'
-          : 'Next Departure: ${next.time} (${next.place})',
-      badge: 'View All',
-      onTap: () => context.push(AppRoutes.bus),
-    );
-  }
-}
-
-/// The signed-in student's next exam, fetched live from their batch schedule.
-class _NextExamCard extends StatelessWidget {
-  const _NextExamCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<List<ExamItem>>(
-      future: getIt<ExamRepository>().fetchExams(),
-      builder: (context, snapshot) {
-        final exams = snapshot.data ?? const <ExamItem>[];
-        if (exams.isEmpty) {
-          return _UpcomingCard(
-            icon: Icons.edit_calendar_rounded,
-            title: 'Exam Schedule',
-            time: snapshot.connectionState == ConnectionState.waiting
-                ? 'Checking for upcoming exams…'
-                : 'No exams scheduled right now',
-            badge: 'Open',
-            onTap: () => context.push(AppRoutes.exams),
-          );
-        }
-        final next = exams.first;
-        return _UpcomingCard(
-          icon: Icons.edit_calendar_rounded,
-          title: '${next.typeLabel}: ${next.title}',
-          time: '${next.dateLabel} · ${next.timeLabel}',
-          badge: 'View All',
-          onTap: () => context.push(AppRoutes.exams),
-        );
-      },
-    );
-  }
-}
-
-/// Guest nudge shown where the student's class/exam card would be.
-class _SignInInviteCard extends StatelessWidget {
-  final VoidCallback onSignIn;
-  const _SignInInviteCard({required this.onSignIn});
-
-  @override
-  Widget build(BuildContext context) {
-    return _UpcomingCard(
-      icon: Icons.lock_open_rounded,
-      title: 'Sign in to see your classes',
-      time: 'Notices, exams, resources and attendance for your batch',
-      badge: 'Sign In',
-      onTap: onSignIn,
-    );
-  }
-}

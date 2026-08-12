@@ -11,58 +11,10 @@ class SampleData {
   // *semantic tokens* only (the models are const and there is no BuildContext
   // here). Consumers must resolve them against the active theme at render
   // time — see `_NoticeCard._resolveColor` in class_notices_screen.dart.
-  // `quickActions` is consumed by home_screen.dart, which renders the static
-  // values directly.
-  static const List<QuickAction> quickActions = [
-    QuickAction(
-        title: 'Bus Schedule',
-        subtitle: 'View bus timing & set alarm',
-        icon: Icons.directions_bus_rounded,
-        color: AppColorToken.primary,
-        route: '/bus',),
-    QuickAction(
-        title: 'Class Notices',
-        subtitle: 'Stay updated',
-        icon: Icons.campaign_rounded,
-        color: AppColorToken.accentCyan,
-        route: '/notices',),
-    QuickAction(
-        title: 'People Search',
-        subtitle: 'Find anyone in campus',
-        icon: Icons.group_rounded,
-        color: AppColorToken.purple,
-        route: '/people',),
-    QuickAction(
-        title: 'Blood Help',
-        subtitle: 'Request or offer blood',
-        icon: Icons.water_drop_rounded,
-        color: AppColorToken.danger,
-        route: '/blood',),
-    QuickAction(
-        title: 'Lost & Found',
-        subtitle: 'Report or find items',
-        icon: Icons.inventory_2_rounded,
-        color: AppColorToken.warning,
-        route: '/lost-found',),
-    QuickAction(
-        title: 'Attendance',
-        subtitle: 'Mark & track attendance',
-        icon: Icons.check_circle_rounded,
-        color: AppColorToken.success,
-        route: '/attendance',),
-    QuickAction(
-        title: 'Exam Schedule',
-        subtitle: 'Quizzes, midterms & finals',
-        icon: Icons.edit_calendar_rounded,
-        color: AppColorToken.danger,
-        route: '/exams',),
-    QuickAction(
-        title: 'Resources',
-        subtitle: 'Notes, files & links',
-        icon: Icons.folder_rounded,
-        color: AppColorToken.primary,
-        route: '/resources',),
-  ];
+  //
+  // The old `quickActions` list lived here; the home screen's tiles are now
+  // user-customisable and are single-sourced in `data/home_cards.dart`
+  // (HomeCardCatalog), driven by HomeCardsCubit.
 
   static List<BusRoute> busRoutes() => [
         const BusRoute(name: 'Mirpur Route', window: '7:30 AM - 10:30 PM', frequency: 'Every 20 min', nextBus: '9:30 AM', favorite: true),

@@ -61,12 +61,18 @@ class _BusRouteInteractiveMapState extends State<BusRouteInteractiveMap> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // Tile URL: Google Maps vector tiles or CartoDB Dark for clean high-contrast
+    // Google raster tiles for light/satellite; CartoDB "dark_all" keeps street
+    // labels in dark mode (the no-label variant reads cleaner but leaves you
+    // unable to tell which road a stop is on).
     final String tileUrl = _isSatellite
         ? 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}'
         : isDark
             ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
             : 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
+
+    // Satellite imagery is busy in both themes, so overlays get the same
+    // treatment there as in dark mode.
+    final needsHighContrast = isDark || _isSatellite;
 
     final List<Polyline> polylines = [];
     final Map<String, BusStopLocation> uniqueStopsMap = {};
@@ -77,11 +83,31 @@ class _BusRouteInteractiveMapState extends State<BusRouteInteractiveMap> {
           route.routeId == _selectedRouteId;
 
       if (isHighlighted) {
+        final isActive = route.routeId == _selectedRouteId;
+        // The palette is tuned for light tiles; on dark/satellite it muddies
+        // into the basemap, so lift it toward white first.
+        final routeColor = needsHighContrast
+            ? Color.lerp(route.color, Colors.white, 0.28)!
+            : route.color;
+        final width = isActive ? 5.5 : 4.0;
+
+        // Dark casing under the line: without it a coloured route disappears
+        // wherever it crosses a road of a similar tone.
+        if (needsHighContrast) {
+          polylines.add(
+            Polyline(
+              points: route.pathPoints,
+              strokeWidth: width + 3,
+              color: Colors.black.withValues(alpha: 0.55),
+            ),
+          );
+        }
+
         polylines.add(
           Polyline(
             points: route.pathPoints,
-            strokeWidth: route.routeId == _selectedRouteId ? 5.5 : 4.0,
-            color: route.color.withValues(alpha: route.routeId == _selectedRouteId ? 1.0 : 0.75),
+            strokeWidth: width,
+            color: routeColor.withValues(alpha: isActive ? 1.0 : 0.8),
           ),
         );
       }
@@ -129,12 +155,17 @@ class _BusRouteInteractiveMapState extends State<BusRouteInteractiveMap> {
                         child: HorizonLogo(size: 24),
                       ),
                     )
+                  // Unselected pins keep a light fill even in dark mode: the
+                  // themed surface colour is nearly the same value as the dark
+                  // basemap, which made stops vanish into the tiles.
                   : Container(
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: isSelectedStop
                             ? context.colors.primary
-                            : context.colors.surfaceAlt,
+                            : (needsHighContrast
+                                ? Colors.white
+                                : context.colors.surfaceAlt),
                         border: Border.all(
                           color: isSelectedStop
                               ? Colors.white
@@ -143,7 +174,8 @@ class _BusRouteInteractiveMapState extends State<BusRouteInteractiveMap> {
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.3),
+                            color: Colors.black
+                                .withValues(alpha: needsHighContrast ? 0.5 : 0.3),
                             blurRadius: 6,
                             offset: const Offset(0, 2),
                           ),

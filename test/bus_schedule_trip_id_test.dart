@@ -90,20 +90,31 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: BusScheduleScreen()));
     await tester.pumpAndSettle();
 
-    // Open the alarm picker from a trip-list row (last alarm button belongs to
-    // the grouped schedule list, not the spotlight card).
-    // The trip-list rows render alarm buttons as IconButton widgets; the
-    // spotlight card uses a bespoke Pressable. Target an IconButton row so we
-    // exercise the list-row path specifically, scrolling it into view first.
-    final listRowAlarm = find.descendant(
-      of: find.byType(IconButton),
-      matching: find.byIcon(Icons.alarm_add_rounded),
+    // Open the alarm picker from the trip-list row for THIS EXACT trip.
+    //
+    // Both entry points now render the shared `_TripAlarmButton`, which
+    // exposes its `tripId`. Matching on that id is what makes this a real
+    // guard: it proves the row independently derived the same id the spotlight
+    // stored. Tapping "whatever alarm button is first" would instead hit the
+    // spotlight's own button — a different trip once the day's early buses have
+    // gone — and prove nothing.
+    //
+    // (The finder previously looked for an IconButton. The screen's redesign
+    // replaced that with this shared widget, so the old finder matched nothing.)
+    final rowAlarmButton = find.byWidgetPredicate(
+      (w) =>
+          w.runtimeType.toString() == '_TripAlarmButton' &&
+          (w as dynamic).tripId == sharedId &&
+          (w as dynamic).dense == true,
+      description: 'dense _TripAlarmButton for the seeded trip',
     );
-    expect(listRowAlarm, findsWidgets,
-        reason: 'expected at least one trip-list alarm IconButton');
-    await tester.ensureVisible(listRowAlarm.first);
+    expect(rowAlarmButton, findsWidgets,
+        reason: 'no trip-list alarm button built the shared id — the list row '
+            'and spotlight have diverged');
+
+    await tester.ensureVisible(rowAlarmButton.first);
     await tester.pumpAndSettle();
-    await tester.tap(listRowAlarm.first);
+    await tester.tap(rowAlarmButton.first, warnIfMissed: false);
     await tester.pumpAndSettle();
 
     // Diagnostic: confirm the modal opened at all before asserting its state.

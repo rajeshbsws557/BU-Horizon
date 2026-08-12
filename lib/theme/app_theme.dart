@@ -143,63 +143,139 @@ class AppThemeColors extends ThemeExtension<AppThemeColors> {
     );
   }
 
-  static const AppThemeColors dark = AppThemeColors(
-    background: Color(0xFF05070E),
-    surface: Color(0xFF0E1524),
-    surfaceAlt: Color(0xFF141C2E),
-    cardSolid: Color(0xFF131B2C),
-    primary: Color(0xFF2E7DF6),
-    primaryDark: Color(0xFF1E63D6),
-    primarySoft: Color(0xFF1B2C4E),
-    accentCyan: Color(0xFF4FC3F7),
-    success: Color(0xFF22C55E),
-    danger: Color(0xFFE23744),
-    warning: Color(0xFFF5A623),
+  // --- Cybersecurity club palettes ------------------------------------------
+  // Four brand palettes, each shipped as a dark (primary) and a light variant
+  // so the light/dark switch keeps working whichever theme is selected.
+
+  /// Theme 1 — Matrix Green: classic terminal / hacker aesthetic.
+  static const AppThemeColors matrixDark = AppThemeColors(
+    background: Color(0xFF0D0D0D),
+    surface: Color(0xFF161616),
+    surfaceAlt: Color(0xFF1E1E1E),
+    cardSolid: Color(0xFF1A1A1A),
+    primary: Color(0xFF00E63B),
+    primaryDark: Color(0xFF00B32E),
+    primarySoft: Color(0xFF0C2A15),
+    accentCyan: Color(0xFF00E5A0),
+    success: Color(0xFF00E63B),
+    danger: Color(0xFFFF4D4D),
+    warning: Color(0xFFFFB000),
     gold: Color(0xFFFFC107),
     purple: Color(0xFF9B6DFF),
-    textPrimary: Color(0xFFF3F6FF),
-    textSecondary: Color(0xFF9AA6BF),
-    textMuted: Color(0xFF7E8CA8),
-    border: Color(0xFF20293D),
+    textPrimary: Color(0xFFE9FFE9),
+    textSecondary: Color(0xFF9DB39D),
+    textMuted: Color(0xFF6E7F6E),
+    border: Color(0xFF2A2A2A),
     blueGradient: LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: [Color(0xFF2E7DF6), Color(0xFF1E63D6)],
+      colors: [Color(0xFF00E63B), Color(0xFF00B32E)],
     ),
     bloodGradient: LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: [Color(0xFFE23744), Color(0xFF9E1C27)],
+      colors: [Color(0xFFFF4D4D), Color(0xFFB01F1F)],
     ),
     heroGradient: LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: [Color(0xFF17233D), Color(0xFF0C1526)],
+      colors: [Color(0xFF16241A), Color(0xFF0D0D0D)],
     ),
   );
 
-  static const AppThemeColors light = AppThemeColors(
-    background: Color(0xFFF4F6FB),
+  static const AppThemeColors matrixLight = AppThemeColors(
+    background: Color(0xFFF2F7F2),
     surface: Color(0xFFFFFFFF),
-    surfaceAlt: Color(0xFFEFF2F8),
+    surfaceAlt: Color(0xFFE9F2E9),
     cardSolid: Color(0xFFFFFFFF),
-    primary: Color(0xFF1B6BF3),
-    primaryDark: Color(0xFF1253C4),
-    primarySoft: Color(0xFFE2EDFF),
+    primary: Color(0xFF0A8F32),
+    primaryDark: Color(0xFF067A28),
+    primarySoft: Color(0xFFDCF3E1),
+    accentCyan: Color(0xFF0E9B8A),
+    success: Color(0xFF0A8F32),
+    danger: Color(0xFFC62828),
+    warning: Color(0xFFB26A00),
+    gold: Color(0xFF96742B),
+    purple: Color(0xFF6D3FC4),
+    textPrimary: Color(0xFF10190F),
+    textSecondary: Color(0xFF44554A),
+    textMuted: Color(0xFF67786B),
+    border: Color(0xFFD3E2D5),
+    blueGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFF0A8F32), Color(0xFF067A28)],
+    ),
+    bloodGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFFC62828), Color(0xFF9B1C1C)],
+    ),
+    heroGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFFE3F5E7), Color(0xFFF2F7F2)],
+    ),
+  );
+
+  /// Theme 2 — Deep Blue Cyber: professional, enterprise SOC look.
+  static const AppThemeColors cyberDark = AppThemeColors(
+    background: Color(0xFF0A0E1A),
+    surface: Color(0xFF141B2E),
+    surfaceAlt: Color(0xFF1B2740),
+    cardSolid: Color(0xFF141B2E),
+    primary: Color(0xFF00B4E6),
+    primaryDark: Color(0xFF0084FF),
+    primarySoft: Color(0xFF10243F),
+    accentCyan: Color(0xFF22E3FF),
+    success: Color(0xFF22C55E),
+    danger: Color(0xFFFF4757),
+    warning: Color(0xFFF5A623),
+    gold: Color(0xFFFFC107),
+    purple: Color(0xFF7C6BFF),
+    textPrimary: Color(0xFFE1E7F5),
+    textSecondary: Color(0xFF9FB0CC),
+    textMuted: Color(0xFF7A8AA6),
+    border: Color(0xFF22304D),
+    blueGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFF00D4FF), Color(0xFF0084FF)],
+    ),
+    bloodGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFFFF4757), Color(0xFFB3202D)],
+    ),
+    heroGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFF17233D), Color(0xFF0A0E1A)],
+    ),
+  );
+
+  static const AppThemeColors cyberLight = AppThemeColors(
+    background: Color(0xFFF2F6FC),
+    surface: Color(0xFFFFFFFF),
+    surfaceAlt: Color(0xFFE8F0FA),
+    cardSolid: Color(0xFFFFFFFF),
+    primary: Color(0xFF0072D8),
+    primaryDark: Color(0xFF005AAE),
+    primarySoft: Color(0xFFDCEBFB),
     accentCyan: Color(0xFF0288D1),
     success: Color(0xFF16A34A),
     danger: Color(0xFFDC2626),
     warning: Color(0xFFD97706),
     gold: Color(0xFFB8935A),
-    purple: Color(0xFF7C3AED),
-    textPrimary: Color(0xFF0E1626),
-    textSecondary: Color(0xFF475569),
+    purple: Color(0xFF6D4BE0),
+    textPrimary: Color(0xFF0B1524),
+    textSecondary: Color(0xFF46586F),
     textMuted: Color(0xFF64748B),
-    border: Color(0xFFDDE3F0),
+    border: Color(0xFFD6E2F0),
     blueGradient: LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: [Color(0xFF1B6BF3), Color(0xFF1253C4)],
+      colors: [Color(0xFF0072D8), Color(0xFF005AAE)],
     ),
     bloodGradient: LinearGradient(
       begin: Alignment.topLeft,
@@ -209,9 +285,220 @@ class AppThemeColors extends ThemeExtension<AppThemeColors> {
     heroGradient: LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: [Color(0xFFE8F0FE), Color(0xFFF3F6FF)],
+      colors: [Color(0xFFE1EEFB), Color(0xFFF2F6FC)],
     ),
   );
+
+  /// Theme 3 — Purple Cipher: elite, distinctive club identity.
+  static const AppThemeColors purpleDark = AppThemeColors(
+    background: Color(0xFF0B0813),
+    surface: Color(0xFF160D24),
+    surfaceAlt: Color(0xFF1E1130),
+    cardSolid: Color(0xFF160D24),
+    primary: Color(0xFFA855F7),
+    primaryDark: Color(0xFF7C3AED),
+    primarySoft: Color(0xFF241539),
+    accentCyan: Color(0xFF22D3EE),
+    success: Color(0xFF34D399),
+    danger: Color(0xFFF43F5E),
+    warning: Color(0xFFFBBF24),
+    gold: Color(0xFFFBBF24),
+    purple: Color(0xFFC084FC),
+    textPrimary: Color(0xFFE8E4F3),
+    textSecondary: Color(0xFFBFB5D0),
+    textMuted: Color(0xFF8E82A3),
+    border: Color(0xFF2C1D43),
+    blueGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFFA855F7), Color(0xFF7C3AED)],
+    ),
+    bloodGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFFF43F5E), Color(0xFFA51E38)],
+    ),
+    heroGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFF241539), Color(0xFF0B0813)],
+    ),
+  );
+
+  static const AppThemeColors purpleLight = AppThemeColors(
+    background: Color(0xFFF8F5FE),
+    surface: Color(0xFFFFFFFF),
+    surfaceAlt: Color(0xFFF0E9FB),
+    cardSolid: Color(0xFFFFFFFF),
+    primary: Color(0xFF7C3AED),
+    primaryDark: Color(0xFF6D28D9),
+    primarySoft: Color(0xFFEDE3FE),
+    accentCyan: Color(0xFF0891B2),
+    success: Color(0xFF059669),
+    danger: Color(0xFFE11D48),
+    warning: Color(0xFFD97706),
+    gold: Color(0xFFB8935A),
+    purple: Color(0xFF7C3AED),
+    textPrimary: Color(0xFF17102A),
+    textSecondary: Color(0xFF52466B),
+    textMuted: Color(0xFF6F6488),
+    border: Color(0xFFE3D9F5),
+    blueGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFF7C3AED), Color(0xFF6D28D9)],
+    ),
+    bloodGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFFE11D48), Color(0xFFB91C3C)],
+    ),
+    heroGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFFEFE6FD), Color(0xFFF8F5FE)],
+    ),
+  );
+
+  /// Theme 4 — Stealth Amber: terminal-ops amber on true black.
+  static const AppThemeColors amberDark = AppThemeColors(
+    background: Color(0xFF0C0C0C),
+    surface: Color(0xFF161616),
+    surfaceAlt: Color(0xFF1E1E1E),
+    cardSolid: Color(0xFF161616),
+    primary: Color(0xFFFFB000),
+    primaryDark: Color(0xFFE09600),
+    primarySoft: Color(0xFF2A2210),
+    accentCyan: Color(0xFF35B8C4),
+    success: Color(0xFF3FB950),
+    danger: Color(0xFFE5484D),
+    warning: Color(0xFFFFB000),
+    gold: Color(0xFFFFC94D),
+    purple: Color(0xFFA371F7),
+    textPrimary: Color(0xFFF0EDE8),
+    textSecondary: Color(0xFF9C9691),
+    textMuted: Color(0xFF7A756F),
+    border: Color(0xFF2A2A2A),
+    blueGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFFFFB000), Color(0xFFE09600)],
+    ),
+    bloodGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFFE5484D), Color(0xFF9E2226)],
+    ),
+    heroGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFF241E12), Color(0xFF0C0C0C)],
+    ),
+  );
+
+  static const AppThemeColors amberLight = AppThemeColors(
+    background: Color(0xFFFAF8F4),
+    surface: Color(0xFFFFFFFF),
+    surfaceAlt: Color(0xFFF2EEE6),
+    cardSolid: Color(0xFFFFFFFF),
+    primary: Color(0xFFB26A00),
+    primaryDark: Color(0xFF8F5400),
+    primarySoft: Color(0xFFFBEFD6),
+    accentCyan: Color(0xFF0E7490),
+    success: Color(0xFF12803C),
+    danger: Color(0xFFC62828),
+    warning: Color(0xFFB26A00),
+    gold: Color(0xFF96742B),
+    purple: Color(0xFF6D3FC4),
+    textPrimary: Color(0xFF1A1713),
+    textSecondary: Color(0xFF524B42),
+    textMuted: Color(0xFF6E665C),
+    border: Color(0xFFE5DED2),
+    blueGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFFB26A00), Color(0xFF8F5400)],
+    ),
+    bloodGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFFC62828), Color(0xFF9B1C1C)],
+    ),
+    heroGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFFF6EFE1), Color(0xFFFAF8F4)],
+    ),
+  );
+
+  /// Defaults kept as aliases so existing call sites (and the `context.colors`
+  /// fallback) keep compiling while the selected variant drives the real theme.
+  static const AppThemeColors dark = cyberDark;
+  static const AppThemeColors light = cyberLight;
+}
+
+/// The four selectable cybersecurity-club palettes.
+///
+/// A variant only chooses *colors*: the light/dark switch is orthogonal, so
+/// every variant ships both a dark and a light palette.
+enum AppThemeVariant {
+  matrixGreen(
+    id: 'matrix_green',
+    label: 'Matrix Green',
+    description: 'Classic terminal hacker green',
+    dark: AppThemeColors.matrixDark,
+    light: AppThemeColors.matrixLight,
+  ),
+  cyberBlue(
+    id: 'cyber_blue',
+    label: 'Cyber Blue',
+    description: 'Professional SOC dashboard blue',
+    dark: AppThemeColors.cyberDark,
+    light: AppThemeColors.cyberLight,
+  ),
+  purpleCipher(
+    id: 'purple_cipher',
+    label: 'Purple Cipher',
+    description: 'Elite, distinctive club identity',
+    dark: AppThemeColors.purpleDark,
+    light: AppThemeColors.purpleLight,
+  ),
+  stealthAmber(
+    id: 'stealth_amber',
+    label: 'Stealth Amber',
+    description: 'Amber on true black, easiest on the eyes',
+    dark: AppThemeColors.amberDark,
+    light: AppThemeColors.amberLight,
+  );
+
+  const AppThemeVariant({
+    required this.id,
+    required this.label,
+    required this.description,
+    required this.dark,
+    required this.light,
+  });
+
+  /// Stable key used for persistence — never rename these strings.
+  final String id;
+  final String label;
+  final String description;
+  final AppThemeColors dark;
+  final AppThemeColors light;
+
+  AppThemeColors palette(Brightness brightness) =>
+      brightness == Brightness.light ? light : dark;
+
+  /// The variant to fall back to when nothing has been chosen (or a stored id
+  /// is no longer recognised).
+  static const AppThemeVariant fallback = AppThemeVariant.cyberBlue;
+
+  static AppThemeVariant fromId(String? id) {
+    for (final variant in AppThemeVariant.values) {
+      if (variant.id == id) return variant;
+    }
+    return fallback;
+  }
 }
 
 /// Const sentinel colors used as *semantic tokens* inside const data models
@@ -293,76 +580,60 @@ class AppCard extends StatelessWidget {
 class AppTheme {
   AppTheme._();
 
-  static ThemeData get dark {
-    final base = ThemeData.dark(useMaterial3: true);
+  /// Builds the [ThemeData] for a palette + brightness pair.
+  ///
+  /// Both the light and dark themes of every variant come through here, so the
+  /// component styling stays identical and only the colors differ.
+  static ThemeData _build(AppThemeColors c, Brightness brightness) {
+    final isLight = brightness == Brightness.light;
+    final base = isLight
+        ? ThemeData.light(useMaterial3: true)
+        : ThemeData.dark(useMaterial3: true);
     final textTheme = GoogleFonts.interTextTheme(base.textTheme).apply(
-      bodyColor: AppThemeColors.dark.textPrimary,
-      displayColor: AppThemeColors.dark.textPrimary,
+      bodyColor: c.textPrimary,
+      displayColor: c.textPrimary,
     );
 
     return base.copyWith(
-      scaffoldBackgroundColor: AppThemeColors.dark.background,
-      primaryColor: AppThemeColors.dark.primary,
+      scaffoldBackgroundColor: c.background,
+      primaryColor: c.primary,
       textTheme: textTheme,
       colorScheme: base.colorScheme.copyWith(
-        brightness: Brightness.dark,
-        primary: AppThemeColors.dark.primary,
-        secondary: AppThemeColors.dark.accentCyan,
-        surface: AppThemeColors.dark.surface,
-        error: AppThemeColors.dark.danger,
+        brightness: brightness,
+        primary: c.primary,
+        secondary: c.accentCyan,
+        surface: c.surface,
+        error: c.danger,
       ),
       appBarTheme: AppBarTheme(
-        backgroundColor: AppThemeColors.dark.background,
+        backgroundColor: isLight ? c.surface : c.background,
         elevation: 0,
         centerTitle: true,
-        iconTheme: IconThemeData(color: AppThemeColors.dark.textPrimary),
+        iconTheme: IconThemeData(color: c.textPrimary),
         titleTextStyle: textTheme.titleLarge?.copyWith(
           fontWeight: FontWeight.w600,
           fontSize: 18,
-          color: AppThemeColors.dark.textPrimary,
+          color: c.textPrimary,
         ),
       ),
-      dividerColor: AppThemeColors.dark.border,
-      splashColor: AppThemeColors.dark.primary.withValues(alpha: 0.08),
-      highlightColor: AppThemeColors.dark.primary.withValues(alpha: 0.05),
-      extensions: const [AppThemeColors.dark],
+      dividerColor: c.border,
+      splashColor: c.primary.withValues(alpha: 0.08),
+      highlightColor: c.primary.withValues(alpha: 0.05),
+      extensions: [c],
     );
   }
 
-  static ThemeData get light {
-    final base = ThemeData.light(useMaterial3: true);
-    final textTheme = GoogleFonts.interTextTheme(base.textTheme).apply(
-      bodyColor: AppThemeColors.light.textPrimary,
-      displayColor: AppThemeColors.light.textPrimary,
-    );
+  /// Dark theme for [variant].
+  static ThemeData darkOf(AppThemeVariant variant) =>
+      _build(variant.dark, Brightness.dark);
 
-    return base.copyWith(
-      scaffoldBackgroundColor: AppThemeColors.light.background,
-      primaryColor: AppThemeColors.light.primary,
-      textTheme: textTheme,
-      colorScheme: base.colorScheme.copyWith(
-        brightness: Brightness.light,
-        primary: AppThemeColors.light.primary,
-        secondary: AppThemeColors.light.accentCyan,
-        surface: AppThemeColors.light.surface,
-        error: AppThemeColors.light.danger,
-      ),
-      appBarTheme: AppBarTheme(
-        backgroundColor: AppThemeColors.light.surface,
-        elevation: 0,
-        centerTitle: true,
-        iconTheme: IconThemeData(color: AppThemeColors.light.textPrimary),
-        titleTextStyle: textTheme.titleLarge?.copyWith(
-          fontWeight: FontWeight.w600,
-          fontSize: 18,
-          color: AppThemeColors.light.textPrimary,
-        ),
-      ),
-      dividerColor: AppThemeColors.light.border,
-      splashColor: AppThemeColors.light.primary.withValues(alpha: 0.08),
-      highlightColor: AppThemeColors.light.primary.withValues(alpha: 0.05),
-      extensions: const [AppThemeColors.light],
-    );
-  }
+  /// Light theme for [variant].
+  static ThemeData lightOf(AppThemeVariant variant) =>
+      _build(variant.light, Brightness.light);
+
+  /// Default-variant themes, kept for call sites that don't care which palette
+  /// is selected (tests, previews).
+  static ThemeData get dark => darkOf(AppThemeVariant.fallback);
+  static ThemeData get light => lightOf(AppThemeVariant.fallback);
 }
 

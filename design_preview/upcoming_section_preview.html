@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BU Horizon — "Upcoming" section: Current vs Option A vs Option B</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+    background: #06090f;
+    color: #e6edf7;
+    padding: 16px 20px 40px;
+  }
+
+  .page-head { margin-bottom: 14px; }
+  .page-head h1 { font-size: 17px; margin: 0 0 4px; font-weight: 800; letter-spacing: .2px; }
+  .page-head p { margin: 0; font-size: 12px; color: #8fa2bd; }
+  .toggle {
+    margin-top: 10px; display: inline-flex; align-items: center; gap: 8px;
+    background: #131c2c; border: 1px solid #26344c; color: #cfe0f5;
+    padding: 7px 12px; border-radius: 999px; font-size: 12px; font-weight: 700;
+    cursor: pointer;
+  }
+  .toggle:hover { border-color: #3b5680; }
+
+  .stage {
+    display: flex; gap: 16px; justify-content: center; align-items: flex-start;
+    padding: 16px 0 6px;
+  }
+  .stage-label {
+    font-size: 11px; font-weight: 800; letter-spacing: 1.2px; color: #7a8aa6;
+    text-transform: uppercase; margin: 18px 0 0; text-align: center;
+  }
+
+  /* ---------- Theme tokens (straight from lib/theme/app_theme.dart) ---------- */
+  [data-theme="dark"] {
+    --bg:#0A0E1A; --surface:#141B2E; --surfaceAlt:#1B2740; --primary:#00B4E6;
+    --primaryDark:#0084FF; --accent:#22E3FF; --success:#22C55E; --purple:#7C6BFF;
+    --warning:#F5A623; --textPrimary:#E1E7F5; --textSecondary:#9FB0CC;
+    --textMuted:#7A8AA6; --border:#22304D;
+    --hero: linear-gradient(135deg, rgba(46,125,246,.20), rgba(20,28,46,.09));
+    --tileShadow: 0 8px 22px rgba(0,0,0,.45);
+  }
+  [data-theme="light"] {
+    --bg:#F2F6FC; --surface:#FFFFFF; --surfaceAlt:#E8F0FA; --primary:#0072D8;
+    --primaryDark:#005AAE; --accent:#0288D1; --success:#16A34A; --purple:#6D4BE0;
+    --warning:#D97706; --textPrimary:#0B1524; --textSecondary:#46586F;
+    --textMuted:#64748B; --border:#D6E2F0;
+    --hero: linear-gradient(135deg, #E8F0FE, #FFFFFF);
+    --tileShadow: 0 8px 22px rgba(15,40,80,.10);
+  }
+
+  /* ---------- Phone frame ---------- */
+  .phone { width: 272px; }
+  .phone-cap {
+    font-size: 11px; font-weight: 800; color: #9fb0cc; text-align: center;
+    margin-bottom: 8px; letter-spacing: .3px;
+  }
+  .phone-cap b { color: #fff; }
+  .phone-cap.bad b { color: #ff8a8a; }
+  .phone-cap.good b { color: #6ee7a8; }
+  .screen {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    padding: 14px 13px 16px;
+    box-shadow: var(--tileShadow);
+    min-height: 300px;
+  }
+
+  /* ---------- Shared section header ---------- */
+  .sec-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 11px; }
+  .sec-title { font-size: 16px; font-weight: 800; color: var(--textPrimary); letter-spacing: .1px; }
+  .sec-sub { font-size: 11px; color: var(--textMuted); margin-top: 2px; font-weight: 600; }
+  .see-all {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: transparent; border: 0; cursor: pointer;
+    color: var(--primary); font-size: 12px; font-weight: 800; padding: 2px 0;
+  }
+  .see-all svg { width: 13px; height: 13px; }
+
+  svg { display: block; }
+
+  /* ---------- CURRENT (what ships today) ---------- */
+  .old-card {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--surfaceAlt); border: 1px solid var(--border);
+    border-radius: 14px; padding: 14px; margin-bottom: 10px;
+  }
+  .old-title { font-size: 14.5px; font-weight: 600; color: var(--textPrimary); line-height: 1.25; }
+  .old-sub { font-size: 12.5px; color: var(--textSecondary); margin-top: 3px; }
+  .old-badge {
+    background: color-mix(in srgb, var(--primary) 16%, transparent);
+    color: var(--primary); font-size: 12px; font-weight: 600;
+    padding: 6px 10px; border-radius: 8px; white-space: nowrap;
+  }
+  .annot {
+    margin-top: 10px; font-size: 10.5px; line-height: 1.5; color: #ff9b9b;
+    background: rgba(255,71,87,.08); border: 1px dashed rgba(255,71,87,.35);
+    border-radius: 10px; padding: 8px 9px;
+  }
+  .annot.ok { color: #7de0a6; background: rgba(34,197,94,.08); border-color: rgba(34,197,94,.35); }
+
+  /* ---------- OPTION A — hero spotlight ---------- */
+  .hero {
+    background-image: var(--hero);
+    border: 1px solid var(--border);
+    border-radius: 18px; padding: 13px; margin-bottom: 10px;
+  }
+  .hero-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 800; letter-spacing: .5px;
+    padding: 4px 9px; border-radius: 20px; white-space: nowrap;
+  }
+  .pill svg { width: 14px; height: 14px; }
+  .pill-ghost {
+    color: var(--pillAccent, var(--primary));
+    background: color-mix(in srgb, var(--pillAccent, var(--primary)) 18%, transparent);
+    border: 1px solid color-mix(in srgb, var(--pillAccent, var(--primary)) 50%, transparent);
+  }
+  .pill-solid {
+    color: #fff; background: var(--pillAccent, var(--primary));
+    font-size: 12px; padding: 5px 10px; letter-spacing: 0;
+  }
+  .hero-mid { display: flex; align-items: center; gap: 11px; margin-top: 11px; }
+  .hero-time .t {
+    font-size: 23px; font-weight: 800; color: var(--textPrimary); line-height: 1.05;
+    letter-spacing: -.4px; white-space: nowrap;
+  }
+  .hero-time .t span { font-size: 13px; font-weight: 800; }
+  .hero-time .day { font-size: 10.5px; font-weight: 700; color: var(--textMuted); margin-top: 2px; }
+  .hero-meta { flex: 1; min-width: 0; }
+  .hero-from {
+    font-size: 12.5px; font-weight: 800; color: var(--primary);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tags { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+  .tag {
+    font-size: 9.5px; font-weight: 700; color: var(--textSecondary);
+    background: color-mix(in srgb, var(--textMuted) 16%, transparent);
+    border-radius: 6px; padding: 2px 6px;
+  }
+  .icon-btn {
+    width: 34px; height: 34px; flex: none; border-radius: 11px; cursor: pointer;
+    background: color-mix(in srgb, var(--primary) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
+    color: var(--primary); display: grid; place-items: center;
+  }
+  .icon-btn svg { width: 17px; height: 17px; }
+  .hero-foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    margin-top: 11px; padding-top: 9px;
+    border-top: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+  }
+  .hero-route {
+    font-size: 11px; color: var(--textMuted); font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .hero-cta {
+    display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+    font-size: 12px; font-weight: 800; color: var(--primary);
+  }
+  .hero-cta svg { width: 13px; height: 13px; }
+
+  .row {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--surfaceAlt); border: 1px solid var(--border);
+    border-radius: 14px; padding: 10px 11px; margin-bottom: 8px;
+  }
+  .tile {
+    width: 38px; height: 38px; flex: none; border-radius: 11px;
+    display: grid; place-items: center;
+  }
+  .tile svg { width: 19px; height: 19px; }
+  .tile-purple { background: color-mix(in srgb, var(--purple) 16%, transparent); color: var(--purple); }
+  .tile-primary { background: color-mix(in srgb, var(--primary) 16%, transparent); color: var(--primary); }
+  .row-body { flex: 1; min-width: 0; }
+  .row-title {
+    font-size: 13px; font-weight: 700; color: var(--textPrimary);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .row-sub {
+    font-size: 11px; color: var(--textMuted); margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .row-right { text-align: right; flex: none; }
+  .rt-time { font-size: 12.5px; font-weight: 800; color: var(--textPrimary); }
+  .rt-sub { font-size: 10px; color: var(--textMuted); margin-top: 2px; font-weight: 600; }
+
+  /* ---------- OPTION B — timeline rail ---------- */
+  .tl-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 18px; padding: 13px 13px 6px;
+  }
+  .tl-day {
+    font-size: 9.5px; font-weight: 800; letter-spacing: 1.1px; color: var(--textMuted);
+    margin: 2px 0 8px; padding-left: 60px;
+  }
+  .tl-day.next { margin-top: 6px; }
+  .tl-item { display: flex; gap: 10px; }
+  .tl-time { width: 50px; flex: none; text-align: right; padding-top: 1px; }
+  .tl-time b { display: block; font-size: 13.5px; font-weight: 800; color: var(--textPrimary); line-height: 1.15; }
+  .tl-time span { font-size: 9.5px; font-weight: 700; color: var(--textMuted); }
+  .tl-rail { width: 14px; flex: none; display: flex; flex-direction: column; align-items: center; }
+  .tl-rail .dot {
+    width: 11px; height: 11px; border-radius: 50%; margin-top: 4px; flex: none;
+    background: var(--surface); border: 2.5px solid var(--textMuted);
+  }
+  .tl-rail .line { flex: 1; width: 2px; background: var(--border); margin: 4px 0 0; border-radius: 2px; }
+  .tl-item.is-next .tl-rail .dot {
+    background: var(--nextAccent, var(--primary));
+    border-color: var(--nextAccent, var(--primary));
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--nextAccent, var(--primary)) 22%, transparent);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--nextAccent, var(--primary)) 22%, transparent); }
+    50%     { box-shadow: 0 0 0 7px color-mix(in srgb, var(--nextAccent, var(--primary)) 8%, transparent); }
+  }
+  .tl-rail .dot.purple { border-color: var(--purple); }
+  .tl-body { flex: 1; min-width: 0; padding-bottom: 15px; }
+  .tl-title {
+    font-size: 13px; font-weight: 700; color: var(--textPrimary);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tl-item.is-next .tl-title { font-weight: 800; }
+  .tl-sub {
+    font-size: 11px; color: var(--textMuted); margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tl-chips { display: flex; align-items: center; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 800; color: #fff;
+    background: var(--nextAccent, var(--primary));
+    padding: 4px 9px; border-radius: 20px; white-space: nowrap;
+  }
+  .chip svg { width: 12px; height: 12px; }
+  .chip-ghost {
+    color: var(--primary); background: transparent;
+    border: 1px solid color-mix(in srgb, var(--primary) 45%, transparent);
+  }
+  .tl-more {
+    display: flex; align-items: center; justify-content: center; gap: 5px;
+    border-top: 1px solid var(--border); margin-top: 2px; padding: 10px 0 9px;
+    font-size: 11.5px; font-weight: 800; color: var(--primary); cursor: pointer;
+  }
+  .tl-more svg { width: 13px; height: 13px; }
+
+  /* Departing-now demo state flips accents to success green */
+  body.boarding .stage { --pillAccent: var(--success); --nextAccent: var(--success); }
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <h1>BU Horizon — “Upcoming” section redesign</h1>
+  <p>Left = what ships today. Middle = <b>Option A (Hero + Rows)</b>. Right = <b>Option B (Timeline Rail)</b>. Countdown is live and ticking.</p>
+  <button class="toggle" id="boardBtn">⚡ Preview the “Departing now” state</button>
+</div>
+
+<div class="stage-label">Dark theme — cyber blue (your default)</div>
+<div class="stage" data-theme="dark"></div>
+
+<div class="stage-label">Light theme — cyber blue</div>
+<div class="stage" data-theme="light"></div>
+
+<script>
+const ICON = {
+  bolt: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.2 2 4.4 13.4h6.2l-.9 8.6 8.9-11.6h-6.3z"/></svg>',
+  timer: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><circle cx="12" cy="13.5" r="7.4"/><path d="M12 10v3.6l2.3 1.6M9.6 2.6h4.8"/></svg>',
+  bus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3.6" width="16" height="13" rx="2.6"/><path d="M4 10.2h16"/><path d="M7.4 20.4v-2M16.6 20.4v-2"/><circle cx="8" cy="13.6" r="1.05" fill="currentColor" stroke="none"/><circle cx="16" cy="13.6" r="1.05" fill="currentColor" stroke="none"/></svg>',
+  cal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.4" y="5" width="17.2" height="15.4" rx="2.6"/><path d="M3.4 9.8h17.2M8.2 3.2v3.4M15.8 3.2v3.4"/><path d="M7.8 13.6h3.2M7.8 16.8h6.4"/></svg>',
+  bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9.2a6 6 0 1 0-12 0c0 4.9-2 6.4-2 6.4h16s-2-1.5-2-6.4Z"/><path d="M10.3 19.2a1.9 1.9 0 0 0 3.4 0"/></svg>',
+  arrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12h14M12.6 5.6 19 12l-6.4 6.4"/></svg>',
+  chevDown: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9.5 12 15.5 18 9.5"/></svg>'
+};
+
+const CURRENT = `
+  <div class="sec-title" style="margin-bottom:11px">Upcoming</div>
+  <div class="old-card">
+    <div style="flex:1;min-width:0">
+      <div class="old-title">BU Bus Schedule · Student Route 01</div>
+      <div class="old-sub">Next Departure: 10:15 AM (Campus)</div>
+    </div>
+    <span class="old-badge">View All</span>
+  </div>
+  <div class="old-card">
+    <div style="flex:1;min-width:0">
+      <div class="old-title">Midterm: Data Structures</div>
+      <div class="old-sub">Sun, 9 Aug · 10:00 AM</div>
+    </div>
+    <span class="old-badge">View All</span>
+  </div>
+  <div class="annot">
+    Two identical grey boxes · icons never render (dead code) · the time is the
+    smallest text · “View All” looks tappable but isn’t · nothing updates.
+  </div>`;
+
+const OPTION_A = `
+  <div class="sec-head">
+    <div>
+      <div class="sec-title">Upcoming</div>
+      <div class="sec-sub">Today, Fri 6 Aug</div>
+    </div>
+    <button class="see-all">See all ${ICON.arrow}</button>
+  </div>
+
+  <div class="hero">
+    <div class="hero-top">
+      <span class="pill pill-ghost">${ICON.bolt}<span class="js-label">NEXT DEPARTURE</span></span>
+      <span class="pill pill-solid">${ICON.timer}<span class="js-countdown">in 12m 30s</span></span>
+    </div>
+    <div class="hero-mid">
+      <div class="hero-time">
+        <div class="t">10:15 <span>AM</span></div>
+      </div>
+      <div class="hero-meta">
+        <div class="hero-from">From Campus</div>
+        <div class="tags"><span class="tag">Surjomukhi</span><span class="tag">Doel</span></div>
+      </div>
+      <button class="icon-btn" title="Set alarm">${ICON.bell}</button>
+    </div>
+    <div class="hero-foot">
+      <span class="hero-route">Student · Route 01 — Rupatoli</span>
+      <span class="hero-cta">View schedule ${ICON.arrow}</span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="tile tile-purple">${ICON.cal}</div>
+    <div class="row-body">
+      <div class="row-title">Midterm · Data Structures</div>
+      <div class="row-sub">Sun, 9 Aug · 10:00 AM · Room 402</div>
+    </div>
+    <div class="row-right">
+      <div class="rt-time">in 3d</div>
+      <div class="rt-sub">9 Aug</div>
+    </div>
+  </div>
+
+  <div class="annot ok">
+    The most urgent thing gets the whole card + a live countdown; everything
+    else compresses to a scannable row. Matches your bus-schedule spotlight.
+  </div>`;
+
+const OPTION_B = `
+  <div class="sec-head">
+    <div>
+      <div class="sec-title">Upcoming</div>
+      <div class="sec-sub">Today, Fri 6 Aug</div>
+    </div>
+    <button class="see-all">See all ${ICON.arrow}</button>
+  </div>
+
+  <div class="tl-card">
+    <div class="tl-day">TODAY</div>
+
+    <div class="tl-item is-next">
+      <div class="tl-time"><b>10:15</b><span>AM</span></div>
+      <div class="tl-rail"><span class="dot"></span><span class="line"></span></div>
+      <div class="tl-body">
+        <div class="tl-title">BU Bus · Route 01</div>
+        <div class="tl-sub">From Campus → Rupatoli</div>
+        <div class="tl-chips">
+          <span class="chip">${ICON.timer}<span class="js-countdown">in 12m 30s</span></span>
+          <span class="chip chip-ghost">${ICON.bell} Alarm</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="tl-item">
+      <div class="tl-time"><b>4:40</b><span>PM</span></div>
+      <div class="tl-rail"><span class="dot"></span><span class="line"></span></div>
+      <div class="tl-body">
+        <div class="tl-title">BU Bus · Route 03</div>
+        <div class="tl-sub">From Campus → Notullabad</div>
+      </div>
+    </div>
+
+    <div class="tl-day next">SUN, 9 AUG</div>
+
+    <div class="tl-item">
+      <div class="tl-time"><b>10:00</b><span>AM</span></div>
+      <div class="tl-rail"><span class="dot purple"></span></div>
+      <div class="tl-body">
+        <div class="tl-title">Midterm · Data Structures</div>
+        <div class="tl-sub">Room 402 · 90 minutes</div>
+      </div>
+    </div>
+
+    <div class="tl-more">Show 4 more ${ICON.chevDown}</div>
+  </div>
+
+  <div class="annot ok">
+    Reads like an agenda: one glance gives order + gaps. The next item pulses
+    with a live countdown. Scales cleanly as you add classes and notices.
+  </div>`;
+
+function phone(cap, capClass, body) {
+  return `<div class="phone">
+    <div class="phone-cap ${capClass}">${cap}</div>
+    <div class="screen">${body}</div>
+  </div>`;
+}
+
+document.querySelectorAll('.stage').forEach(stage => {
+  stage.innerHTML =
+    phone('CURRENT — <b>ships today</b>', 'bad', CURRENT) +
+    phone('OPTION A — <b>Hero + Rows</b>', 'good', OPTION_A) +
+    phone('OPTION B — <b>Timeline Rail</b>', 'good', OPTION_B);
+});
+
+/* ---- Live countdown so the "it actually ticks" idea is visible ---- */
+let target = Date.now() + (12 * 60 + 30) * 1000;
+function fmt(ms) {
+  if (ms <= 0) return 'Now';
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (h > 0) return h + 'h ' + String(m).padStart(2, '0') + 'm';
+  if (m > 0) return m + 'm ' + String(sec).padStart(2, '0') + 's';
+  return sec + 's';
+}
+function tick() {
+  const boarding = document.body.classList.contains('boarding');
+  const text = boarding ? 'At the stop' : 'in ' + fmt(target - Date.now());
+  document.querySelectorAll('.js-countdown').forEach(el => el.textContent = text);
+  document.querySelectorAll('.js-label').forEach(el =>
+    el.textContent = boarding ? 'DEPARTING NOW' : 'NEXT DEPARTURE');
+}
+setInterval(tick, 1000);
+tick();
+
+document.getElementById('boardBtn').addEventListener('click', () => {
+  document.body.classList.toggle('boarding');
+  tick();
+});
+</script>
+</body>
+</html>

@@ -29,10 +29,12 @@ class BusAlarmPickerModal extends StatefulWidget {
   State<BusAlarmPickerModal> createState() => _BusAlarmPickerModalState();
 }
 
-class _BusAlarmPickerModalState extends State<BusAlarmPickerModal> {
+class _BusAlarmPickerModalState extends State<BusAlarmPickerModal>
+    with WidgetsBindingObserver {
   int _selectedLeadMinutes = 15; // Default lead time: 15 minutes before
   DateTime? _manualRingTimeOverride;
   ScheduledBusAlarmInfo? _existingAlarm;
+  AlarmPermissionStatus? _permissions;
   bool _loading = true;
   bool _isSaving = false;
 
@@ -41,20 +43,57 @@ class _BusAlarmPickerModalState extends State<BusAlarmPickerModal> {
   @override
   void initState() {
     super.initState();
-    _checkExistingAlarm();
+    WidgetsBinding.instance.addObserver(this);
+    _initialize();
   }
 
-  Future<void> _checkExistingAlarm() async {
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The user may have just flipped the switch in system Settings. Re-read on
+    // return (without re-prompting) so the warning disappears by itself.
+    if (state == AppLifecycleState.resumed) {
+      _recheckPermissions(prompt: false);
+    }
+  }
+
+  /// Loads any existing alarm *and* asks for the OS permissions the alarm
+  /// needs. Opening this sheet is the natural moment to prompt: the user has
+  /// just said "I want an alarm", so the system dialog has obvious context.
+  /// Previously nothing was ever requested here, so on Android 13+ the alarm
+  /// was scheduled into a void and simply never rang.
+  Future<void> _initialize() async {
     final alarm = await BusAlarmService.instance.getAlarmForTrip(widget.tripId);
+    if (mounted) {
+      setState(() {
+        _existingAlarm = alarm;
+        if (alarm != null) {
+          _selectedLeadMinutes = alarm.leadMinutes;
+          _manualRingTimeOverride = alarm.scheduledRingTime;
+        }
+        _loading = false;
+      });
+    }
+
+    if (kIsWeb) return;
+    final permissions = await BusAlarmService.instance.ensurePermissions();
     if (!mounted) return;
-    setState(() {
-      _existingAlarm = alarm;
-      if (alarm != null) {
-        _selectedLeadMinutes = alarm.leadMinutes;
-        _manualRingTimeOverride = alarm.scheduledRingTime;
-      }
-      _loading = false;
-    });
+    setState(() => _permissions = permissions);
+  }
+
+  /// Refreshes the banner. Pass `prompt: false` for a silent status read (e.g.
+  /// when coming back from Settings) so the user isn't re-prompted.
+  Future<void> _recheckPermissions({bool prompt = true}) async {
+    if (kIsWeb) return;
+    final permissions =
+        await BusAlarmService.instance.ensurePermissions(prompt: prompt);
+    if (!mounted) return;
+    setState(() => _permissions = permissions);
   }
 
   DateTime get _calculatedRingTime {
@@ -115,6 +154,19 @@ class _BusAlarmPickerModalState extends State<BusAlarmPickerModal> {
       if (!mounted) return;
       widget.onAlarmUpdated?.call();
       Navigator.pop(context, alarm);
+    } on BusAlarmException catch (e) {
+      // Only reached when the platform itself refuses (or on web). Missing
+      // permissions no longer land here — they never block the alarm.
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+      await _recheckPermissions();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          duration: const Duration(seconds: 6),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _isSaving = false);
@@ -239,6 +291,16 @@ class _BusAlarmPickerModalState extends State<BusAlarmPickerModal> {
                 ),
               )
             else ...[
+              // Permission state, stated plainly. Without this the user had no
+              // way to tell a working alarm from one the OS will swallow.
+              if (_permissions != null && !_permissions!.isFullyGranted) ...[
+                _PermissionWarning(
+                  status: _permissions!,
+                  onFix: _recheckPermissions,
+                ),
+                const SizedBox(height: 14),
+              ],
+
               // Trip Summary Info Banner
               Container(
                 padding: const EdgeInsets.all(12),
@@ -539,6 +601,124 @@ class _BusAlarmPickerModalState extends State<BusAlarmPickerModal> {
             color: context.colors.primary,
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Advisory notice about a switch that would make the alarm work better.
+///
+/// This is *advice*, never a blocker — the alarm is scheduled regardless.
+///
+/// It also names the right destination. The notification switch is NOT under
+/// "Permissions" on Android 12 and below (POST_NOTIFICATIONS only exists from
+/// 13), which is why an earlier version sent users hunting for a permission
+/// that wasn't there. The button now deep-links straight to the screen that
+/// owns the switch.
+class _PermissionWarning extends StatelessWidget {
+  final AlarmPermissionStatus status;
+  final Future<void> Function() onFix;
+
+  const _PermissionWarning({required this.status, required this.onFix});
+
+  Future<void> _openSettings(BuildContext context) async {
+    final target = !status.notificationsGranted
+        ? AlarmSettingsTarget.notifications
+        : AlarmSettingsTarget.exactAlarms;
+
+    final opened = await BusAlarmService.instance.openAlarmSettings(target);
+    if (!context.mounted) return;
+
+    if (!opened) {
+      // Some OEM ROMs don't expose these screens; spell out the path instead
+      // of leaving a dead button.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Open Settings › Apps › BU Horizon › Notifications to turn this on.',
+          ),
+          duration: Duration(seconds: 6),
+        ),
+      );
+    }
+    // Re-read on return so the banner clears itself once it's fixed.
+    await onFix();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final notificationsOff = !status.notificationsGranted;
+    final color =
+        notificationsOff ? context.colors.danger : context.colors.warning;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            notificationsOff
+                ? Icons.notifications_off_rounded
+                : Icons.running_with_errors_rounded,
+            color: color,
+            size: 22,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  notificationsOff
+                      ? 'Notifications are off for BU Horizon'
+                      : 'Alarm may ring a few minutes late',
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: context.colors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  notificationsOff
+                      ? 'You can still set the alarm, but it may stay silent. '
+                          'The switch is under Notifications (not Permissions).'
+                      : 'Exact alarms are off, so Android may delay the '
+                          'reminder. Turn on "Alarms & reminders" for exact timing.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.4,
+                    color: context.colors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                TextButton(
+                  onPressed: () => _openSettings(context),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    notificationsOff
+                        ? 'Open notification settings'
+                        : 'Open alarm settings',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                      color: color,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

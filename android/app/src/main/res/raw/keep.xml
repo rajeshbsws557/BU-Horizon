@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Protects resources that are only ever referenced BY NAME AT RUNTIME.
+
+  WHY THIS EXISTS
+  `ic_stat_bus_alarm` is passed to flutter_local_notifications as a plain Dart
+  string. Nothing in Java/Kotlin/XML mentions it, so R8's resource shrinker
+  concluded it was dead and removed it from the release APK. The plugin then
+  failed at schedule time with:
+
+      The resource ic_stat_bus_alarm could not be found.
+      Please make sure it has been added as a drawable resource...
+
+  ...which took the whole alarm down with it. `tools:keep` tells the shrinker
+  the reference exists even though it can't see it.
+
+  Anything else added here must follow the same rule: referenced only as a
+  runtime string.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_stat_bus_alarm" />

@@ -1,9 +1,19 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Re-arm scheduled bus alarms after a reboot (handled by the plugin's
+         ScheduledNotificationBootReceiver declared below). -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- Android 13+: without this the alarm notification is never shown, so the
+         alarm is scheduled but silently never rings. Requested at runtime. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Android 12+ exact timing. SCHEDULE_EXACT_ALARM is user-revocable;
+         USE_EXACT_ALARM is auto-granted for genuine alarm-clock features like
+         this one, so a departure alarm still fires on the exact minute. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
     <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <!-- Android 14+: lets the alarm take over the lock screen like a clock
+         alarm instead of arriving as a silent, easily-missed notification. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <application

@@ -20,6 +20,8 @@ class LocalStore {
   final SharedPreferences _prefs;
 
   static const _themeKey = 'settings.theme_mode';
+  static const _themeVariantKey = 'settings.theme_variant';
+  static const _homeCardsKey = 'settings.home_cards';
   static const _cachePrefix = 'cache.';
 
   // --- Settings -------------------------------------------------------------
@@ -27,6 +29,23 @@ class LocalStore {
   /// 'light' | 'dark' | null (never chosen).
   String? get themeMode => _prefs.getString(_themeKey);
   Future<void> setThemeMode(String mode) => _prefs.setString(_themeKey, mode);
+
+  /// An [AppThemeVariant.id], or null when the user hasn't picked a palette.
+  String? get themeVariant => _prefs.getString(_themeVariantKey);
+  Future<void> setThemeVariant(String id) =>
+      _prefs.setString(_themeVariantKey, id);
+
+  /// The ordered [HomeCardCatalog] ids the student pinned to their home
+  /// screen, or null when they have never customised it (→ apply the defaults).
+  ///
+  /// An explicitly saved *empty* list is meaningful — "I removed every card" —
+  /// so it must not be confused with "never chosen".
+  List<String>? get homeCards => _prefs.getStringList(_homeCardsKey);
+  Future<void> setHomeCards(List<String> ids) =>
+      _prefs.setStringList(_homeCardsKey, ids);
+
+  /// Forgets the saved layout so the default cards apply again.
+  Future<void> clearHomeCards() => _prefs.remove(_homeCardsKey);
 
   bool? getFlag(String key) => _prefs.getBool('settings.$key');
   Future<void> setFlag(String key, bool value) =>

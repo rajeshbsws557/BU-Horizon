@@ -8,12 +8,18 @@ class HorizonLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipOval(
+    return Container(
+      width: size,
+      height: size,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.white,
+      ),
+      clipBehavior: Clip.antiAlias,
+      padding: EdgeInsets.all(size * 0.001),
       child: Image.asset(
         'assets/images/logo.png',
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
+        fit: BoxFit.contain,
         semanticLabel: 'BU Horizon logo',
       ),
     );

@@ -4,36 +4,69 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../data/local_store.dart';
 import '../di/di.dart';
+import '../theme/app_theme.dart';
 
-/// Cubit managing the application's [ThemeMode] between light and dark.
+/// Combines [ThemeMode] (light/dark) with [AppThemeVariant] (the selected
+/// cybersecurity palette).
+class ThemeState {
+  final ThemeMode mode;
+  final AppThemeVariant variant;
+
+  const ThemeState(this.mode, this.variant);
+
+  ThemeState copyWith({ThemeMode? mode, AppThemeVariant? variant}) =>
+      ThemeState(mode ?? this.mode, variant ?? this.variant);
+
+  bool get isLight => mode == ThemeMode.light;
+}
+
+/// Cubit managing the application's theme: both brightness (light/dark) and
+/// the selected cybersecurity palette variant.
 ///
-/// The chosen mode is persisted through [LocalStore] so it survives restarts.
+/// Both choices are persisted through [LocalStore] so they survive restarts.
 /// When persistence is unavailable (e.g. UI-only builds / tests) it simply
-/// defaults to dark and no-ops the save.
-class ThemeCubit extends Cubit<ThemeMode> {
-  ThemeCubit() : super(_initialMode());
+/// defaults to dark + cyber-blue and no-ops the save.
+class ThemeCubit extends Cubit<ThemeState> {
+  ThemeCubit() : super(_initialState());
 
-  static ThemeMode _initialMode() {
+  static ThemeState _initialState() {
+    ThemeMode mode = ThemeMode.dark;
+    AppThemeVariant variant = AppThemeVariant.fallback;
+
     if (getIt.isRegistered<LocalStore>()) {
-      switch (getIt<LocalStore>().themeMode) {
+      final store = getIt<LocalStore>();
+      switch (store.themeMode) {
         case 'light':
-          return ThemeMode.light;
+          mode = ThemeMode.light;
+          break;
         case 'dark':
-          return ThemeMode.dark;
+          mode = ThemeMode.dark;
+          break;
       }
+      variant = AppThemeVariant.fromId(store.themeVariant);
     }
-    return ThemeMode.dark;
+    return ThemeState(mode, variant);
   }
 
-  void toggleTheme() =>
-      setThemeMode(state == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark);
+  void toggleTheme() => setThemeMode(
+      state.mode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark);
 
   void setThemeMode(ThemeMode mode) {
-    emit(mode);
+    emit(state.copyWith(mode: mode));
     if (getIt.isRegistered<LocalStore>()) {
-      getIt<LocalStore>().setThemeMode(mode == ThemeMode.light ? 'light' : 'dark');
+      getIt<LocalStore>()
+          .setThemeMode(mode == ThemeMode.light ? 'light' : 'dark');
     }
   }
 
-  bool get isLight => state == ThemeMode.light;
+  void setVariant(AppThemeVariant variant) {
+    emit(state.copyWith(variant: variant));
+    if (getIt.isRegistered<LocalStore>()) {
+      getIt<LocalStore>().setThemeVariant(variant.id);
+    }
+  }
+
+  bool get isLight => state.isLight;
+  ThemeMode get mode => state.mode;
+  AppThemeVariant get variant => state.variant;
 }

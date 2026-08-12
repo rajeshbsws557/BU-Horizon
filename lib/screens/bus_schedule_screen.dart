@@ -1,10 +1,13 @@
 // Developer Branding Watermark: Rajesh Biswas (rajeshbiswas.dev) - BU Horizon
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../data/university_bus_schedule_data.dart';
 import '../di/di.dart';
 import '../repositories/bus_schedule_repository.dart';
 import '../services/bus_alarm_service.dart';
+import '../services/next_departure_resolver.dart';
 import '../theme/app_theme.dart';
 import '../widgets/bus_alarm_picker_modal.dart';
 import '../widgets/bus_route_interactive_map.dart';
@@ -14,13 +17,130 @@ import '../widgets/motion.dart';
 /// Canonical campus place name in the bundled + live timetable.
 const String _kCampusPlace = 'বিশ্ববিদ্যালয়';
 
-/// Robust campus check: tolerates surrounding whitespace / partial matches
-/// that can appear in live Supabase rows (a single stray char used to break
-/// the direction filter silently).
-bool _isCampusPlace(String place) {
-  final p = place.trim();
-  return p == _kCampusPlace || p.contains(_kCampusPlace);
+/// Bangla letters that have both a precomposed form and a base+nukta form.
+///
+/// The two spellings look identical but are different code points, so a plain
+/// `==` between a hand-typed constant and a timetable row can silently fail —
+/// exactly what used to make the campus checks below never fire. Everything is
+/// decomposed before comparison so both spellings meet in the middle.
+const Map<int, String> _kBanglaNuktaForms = {
+  0x09DC: '\u09A1\u09BC', // ড়
+  0x09DD: '\u09A2\u09BC', // ঢ়
+  0x09DF: '\u09AF\u09BC', // য়
+};
+
+/// Comparison form of a place name: nukta-normalised, trimmed, single-spaced.
+String _normalizePlace(String place) {
+  final buffer = StringBuffer();
+  for (final rune in place.runes) {
+    buffer.write(_kBanglaNuktaForms[rune] ?? String.fromCharCode(rune));
+  }
+  return buffer.toString().trim().replaceAll(RegExp(r'\s+'), ' ');
 }
+
+/// Robust campus check: tolerates surrounding whitespace, spelling variants and
+/// partial matches that can appear in live Supabase rows.
+bool _isCampusPlace(String place) {
+  final p = _normalizePlace(place);
+  final campus = _normalizePlace(_kCampusPlace);
+  return p == campus || p.contains(campus);
+}
+
+/// Loose place equality. Live Supabase rows and the printed stop list spell the
+/// same stop slightly differently ("রূপাতলী" vs "রূপাতলী হাউজিং"), so a plain
+/// `==` would silently drop valid matches.
+bool _placesMatch(String a, String b) {
+  final x = _normalizePlace(a);
+  final y = _normalizePlace(b);
+  if (x.isEmpty || y.isEmpty) return false;
+  return x == y || x.contains(y) || y.contains(x);
+}
+
+
+/// The printed stop list of a route ("A - B - C") as ordered stop names.
+///
+/// This is the only place that knows the direction a bus travels in, which is
+/// what lets the schedule answer "where can this trip take me?" instead of only
+/// "where does it start?".
+List<String> _routeStops(UniversityBusRoute route) {
+  final desc = route.routeDescription?.trim() ?? '';
+  if (desc.isEmpty) return const [];
+  return desc
+      .split(RegExp(r'\s*[-–—]\s*'))
+      .map((s) => s.trim())
+      .where((s) => s.isNotEmpty)
+      .toList();
+}
+
+/// Every place a trip leaving [section] can drop you at, in travel order.
+///
+/// A [DepartureSection] only stores where a bus *starts*. The destinations are
+/// derived from the route itself:
+///  * the printed stop list, walked forward (or backward) from the departure
+///    point, so intermediate stops count as valid destinations too; and
+///  * the opposite section's departure point — the return-leg terminal, and the
+///    only signal available for Teacher/Staff routes that carry no stop list.
+///
+/// The departure point itself is never returned: a bus leaving the university
+/// is not a bus that takes you to the university. That inversion was the bug
+/// behind "Where to go? → University" listing campus-outbound trips.
+@visibleForTesting
+List<String> destinationsForSection(
+  UniversityBusRoute route,
+  DepartureSection section,
+) {
+  final origin = section.departurePlace.trim();
+  final destinations = <String>[];
+
+  void add(String raw) {
+    final place = raw.trim();
+    if (place.isEmpty) return;
+    if (_placesMatch(place, origin)) return; // origin is never a destination
+    if (destinations.any((existing) => _placesMatch(existing, place))) return;
+    destinations.add(place);
+  }
+
+  final stops = _routeStops(route);
+  if (stops.isNotEmpty) {
+    final originIndex = stops.indexWhere((s) => _placesMatch(s, origin));
+    if (originIndex == 0) {
+      // Starts at the head of the printed list → travels forward.
+      for (final stop in stops.skip(1)) {
+        add(stop);
+      }
+    } else if (originIndex == stops.length - 1) {
+      // Starts at the tail (typically the campus) → travels backward.
+      for (final stop in stops.reversed.skip(1)) {
+        add(stop);
+      }
+    }
+    // A mid-list origin gives no reliable direction, so it falls through to the
+    // opposite-terminal signal below rather than guessing.
+  }
+
+  for (final other in route.departureSections) {
+    add(other.departurePlace);
+  }
+
+  return destinations;
+}
+
+/// The far terminal of a trip leaving [section] — what the UI shows as the
+/// headline "Going to" when no specific place has been picked.
+@visibleForTesting
+String primaryDestinationFor(
+  UniversityBusRoute route,
+  DepartureSection section,
+) {
+  for (final other in route.departureSections) {
+    if (!_placesMatch(other.departurePlace, section.departurePlace)) {
+      return other.departurePlace.trim();
+    }
+  }
+  final destinations = destinationsForSection(route, section);
+  return destinations.isEmpty ? '' : destinations.last;
+}
+
 
 /// Stable, unique id for a single trip. One formula shared by every "Set
 /// Alarm" entry point so the same physical trip never yields two ids.
@@ -106,6 +226,9 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
   void initState() {
     super.initState();
     _load();
+    // Populate the armed-trip registry so every row and the spotlight card
+    // know which trips already have alarms set.
+    busAlarmRegistry.refresh();
   }
 
   Future<void> _load() async {
@@ -129,18 +252,34 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
     }
   }
 
-  /// 'All Places' + every departure place present in the loaded timetable.
+  /// 'All Places' + every place the loaded timetable can actually take you to.
+  ///
+  /// Built from destinations (not departure points) because this list backs the
+  /// "Where to go?" picker — offering a place no bus travels *to* would be a
+  /// dead end. The campus is hoisted to the top since it is by far the most
+  /// common answer to "where do you want to go?".
   List<String> get _availablePlaces {
-    final places = <String>{};
+    final places = <String>[];
     for (final cat in _categories) {
       for (final r in cat.routes) {
         for (final sec in r.departureSections) {
-          places.add(sec.departurePlace);
+          for (final destination in destinationsForSection(r, sec)) {
+            if (!places.any((existing) => _placesMatch(existing, destination))) {
+              places.add(destination);
+            }
+          }
         }
       }
     }
+    places.sort((a, b) {
+      final aCampus = _isCampusPlace(a);
+      final bCampus = _isCampusPlace(b);
+      if (aCampus == bCampus) return 0;
+      return aCampus ? -1 : 1;
+    });
     return ['All Places', ...places];
   }
+
 
   UniversityBusCategory get _currentCategory =>
       _categories[_selectedCategoryIndex];
@@ -169,12 +308,16 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
     });
   }
 
-  bool _matchesFilter(String tripTime, String departurePlace) {
+  /// A trip matches when it *travels to* the picked place — not when it leaves
+  /// from it. [destinations] comes from [destinationsForSection], so a bus
+  /// leaving the campus is excluded from "Where to go? → University".
+  bool _matchesFilter(String tripTime, List<String> destinations) {
     bool matchesPlace = true;
     if (_selectedPlaceFilter != 'All Places') {
-      matchesPlace = departurePlace.contains(_selectedPlaceFilter) ||
-          _selectedPlaceFilter.contains(departurePlace);
+      matchesPlace =
+          destinations.any((d) => _placesMatch(d, _selectedPlaceFilter));
     }
+
 
     bool matchesTime = true;
     if (_selectedTimeFilter != 'All Times') {
@@ -444,12 +587,22 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
     final results = <Map<String, String>>[];
     for (final r in cat.routes) {
       for (final sec in r.departureSections) {
+        final destinations = destinationsForSection(r, sec);
+        // Headline the stop the user actually asked for; otherwise the end of
+        // the line.
+        final goingTo = _selectedPlaceFilter == 'All Places'
+            ? primaryDestinationFor(r, sec)
+            : destinations.firstWhere(
+                (d) => _placesMatch(d, _selectedPlaceFilter),
+                orElse: () => primaryDestinationFor(r, sec),
+              );
         for (final trip in sec.trips) {
-          if (_matchesFilter(trip.time, sec.departurePlace)) {
+          if (_matchesFilter(trip.time, destinations)) {
             results.add({
               'category': cat.title,
               'route': r.routeName,
               'place': sec.departurePlace,
+              'to': goingTo,
               'time': trip.time,
               'bus': trip.busName,
               'desc': r.routeDescription ?? '',
@@ -458,6 +611,7 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
         }
       }
     }
+
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -484,7 +638,10 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Showing ${results.length} ${cat.title} buses matching your filter',
+                          _selectedPlaceFilter == 'All Places'
+                              ? 'Showing ${results.length} ${cat.title} buses matching your filter'
+                              : 'Showing ${results.length} ${cat.title} buses going to $_selectedPlaceFilter',
+
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -504,114 +661,97 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
                         'No available buses found matching your selected Place & Time filter. Try clearing or adjusting filters.',
                   )
                 else
+                  // One row per trip. The category banner above already states
+                  // the category and the destination, and the route's full stop
+                  // list was repeated on every single card — both are dropped
+                  // here so a filter result is a scannable line, not a block.
                   for (int i = 0; i < results.length; i++)
                     Container(
-                      margin: const EdgeInsets.only(bottom: 12),
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
                       decoration: BoxDecoration(
                         color: context.colors.surfaceAlt,
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: context.colors.border),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black
-                                .withValues(alpha: isDark ? 0.25 : 0.04),
-                            blurRadius: 10,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      child: Row(
                         children: [
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: context.colors.primary.withValues(alpha: 0.14),
-                              borderRadius: const BorderRadius.vertical(
-                                  top: Radius.circular(15)),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(Icons.location_on_rounded,
-                                    size: 16, color: context.colors.primary),
-                                const SizedBox(width: 6),
-                                Text(
-                                  'DEPARTURE PLACE : ',
-                                  style: TextStyle(
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: context.colors.primary,
-                                    letterSpacing: 0.5,
-                                  ),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(minWidth: 72),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 5),
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: context.colors.primary
+                                    .withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                results[i]['time']!,
+                                style: TextStyle(
+                                  color: context.colors.primary,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 13,
                                 ),
-                                Expanded(
-                                  child: Text(
-                                    results[i]['place']!,
-                                    style: TextStyle(
-                                      fontSize: 14.5,
-                                      fontWeight: FontWeight.w800,
-                                      color: context.colors.primary,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
                           ),
-                          Padding(
-                            padding: const EdgeInsets.all(14),
-                            child: Row(
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    color: context.colors.primary
-                                        .withValues(alpha: 0.15),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: Text(
-                                    results[i]['time']!,
-                                    style: TextStyle(
-                                      color: context.colors.primary,
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 14.5,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 14),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        '${results[i]['category']} · ${results[i]['route']}',
+                                Row(
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        results[i]['route']!,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
                                         style: TextStyle(
                                           fontSize: 12.5,
-                                          color: context.colors.textSecondary,
-                                          fontWeight: FontWeight.w600,
+                                          fontWeight: FontWeight.w700,
+                                          color: context.colors.textPrimary,
                                         ),
                                       ),
-                                      const SizedBox(height: 4),
-                                      _BusNamePillTags(
-                                          busNameString: results[i]['bus']!),
-                                      if (results[i]['desc']!.isNotEmpty) ...[
-                                        const SizedBox(height: 6),
-                                        Text(
-                                          results[i]['desc']!,
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            fontSize: 11.5,
-                                            color: context.colors.textMuted
-                                                .withValues(alpha: 0.9),
-                                          ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Icon(Icons.arrow_forward_rounded,
+                                        size: 12,
+                                        color: context.colors.textMuted),
+                                    const SizedBox(width: 4),
+                                    Flexible(
+                                      child: Text(
+                                        results[i]['to']!.isEmpty
+                                            ? results[i]['place']!
+                                            : results[i]['to']!,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: context.colors.primary,
                                         ),
-                                      ],
-                                    ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  'Board at ${results[i]['place']}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: context.colors.textSecondary,
                                   ),
+                                ),
+                                const SizedBox(height: 4),
+                                _BusNamePillTags(
+                                  busNameString: results[i]['bus']!,
+                                  isSmall: true,
                                 ),
                               ],
                             ),
@@ -673,96 +813,25 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
                       ),
                     ),
                   ),
+                // The full stop list is reference material rather than
+                // something you re-read on every visit, so it starts collapsed.
+                // The map used to be rendered *again* here at full height even
+                // though the header toggle already shows it — that duplicate
+                // roughly doubled the page height for the same information.
                 if (route.routeDescription != null &&
-                    route.routeDescription!.isNotEmpty &&
-                    !_showRouteTimeline)
+                    route.routeDescription!.isNotEmpty)
                   Entrance(
                     key: ValueKey('${route.id}_desc'),
                     index: sectionsToShow.length + 1,
-                    child: Container(
-                      margin: const EdgeInsets.only(top: 6, bottom: 16),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: context.colors.surfaceAlt,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: context.colors.primary.withValues(alpha: 0.25),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.alt_route_rounded,
-                                size: 18,
-                                color: context.colors.primary,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  '${route.routeName} Stops Summary :',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 14.5,
-                                    color: context.colors.primary,
-                                  ),
-                                ),
-                              ),
-                              TextButton.icon(
-                                onPressed: () =>
-                                    setState(() => _showRouteTimeline = true),
-                                icon: const Icon(Icons.map_outlined, size: 15),
-                                label: const Text('Interactive Map',
-                                    style: TextStyle(fontSize: 12)),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            route.routeDescription!,
-                            style: const TextStyle(
-                              fontSize: 13.5,
-                              height: 1.45,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
+                    child: _RouteStopsSummary(
+                      routeName: route.routeName,
+                      stops: route.routeDescription!,
+                      onShowMap: _showRouteTimeline
+                          ? null
+                          : () => setState(() => _showRouteTimeline = true),
                     ),
                   ),
-                const SizedBox(height: 12),
-                Entrance(
-                  key: ValueKey('${route.id}_bottom_google_map'),
-                  index: sectionsToShow.length + 2,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10, left: 4),
-                        child: Row(
-                          children: [
-                            Icon(Icons.map_rounded, color: context.colors.primary, size: 18),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Interactive Route Map (Barishal City)',
-                              style: TextStyle(
-                                fontSize: 15.5,
-                                fontWeight: FontWeight.w800,
-                                color: context.colors.primary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      BusRouteInteractiveMap(
-                        activeRouteId: route.id,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
                 Center(
                   child: Text(
                     'BU Horizon · Developed by Rajesh Biswas (rajeshbiswas.dev)',
@@ -781,14 +850,22 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
   }
 
   void _showPlacePicker(BuildContext context) {
+    // Destinations include every reachable stop, so this list is long: it gets
+    // its own bounded, scrollable sheet instead of a Column that would run off
+    // the bottom of the screen (and take the first entries with it).
+    final places = _availablePlaces;
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) {
         return SafeArea(
-          child: SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.7,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -799,17 +876,25 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
                     style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                   ),
                 ),
-                for (final p in _availablePlaces)
-                  ListTile(
-                    leading: const Icon(Icons.place_outlined),
-                    title: Text(p),
-                    selected: _selectedPlaceFilter == p,
-                    selectedColor: context.colors.primary,
-                    onTap: () {
-                      setState(() => _selectedPlaceFilter = p);
-                      Navigator.pop(ctx);
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: places.length,
+                    itemBuilder: (_, index) {
+                      final p = places[index];
+                      return ListTile(
+                        leading: const Icon(Icons.place_outlined),
+                        title: Text(p),
+                        selected: _selectedPlaceFilter == p,
+                        selectedColor: context.colors.primary,
+                        onTap: () {
+                          setState(() => _selectedPlaceFilter = p);
+                          Navigator.pop(ctx);
+                        },
+                      );
                     },
                   ),
+                ),
               ],
             ),
           ),
@@ -817,6 +902,7 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
       },
     );
   }
+
 
   void _showTimePicker(BuildContext context) {
     showModalBottomSheet(
@@ -866,7 +952,20 @@ class _BusScheduleViewState extends State<_BusScheduleView> {
   }
 }
 
-class _LiveNextBusSpotlightCard extends StatelessWidget {
+/// Overrides "now" for the spotlight card in widget tests, so a test can assert
+/// on a specific departure instead of whatever time the suite happens to run
+/// at. Null in production, where the real clock is used.
+@visibleForTesting
+DateTime Function()? debugNextDepartureClock;
+
+/// The "Next Departure" hero card.
+///
+/// Previously this rendered `sections.first.trips.first` — the first row of the
+/// printed timetable — so it showed the 8:30 AM bus at 9 PM and never changed.
+/// It is now driven by [resolveNextDeparture] against the live clock and ticks
+/// once a second so the countdown, the highlighted trip and the "Set Alarm"
+/// target all stay correct without a manual refresh.
+class _LiveNextBusSpotlightCard extends StatefulWidget {
   final UniversityBusRoute route;
   final List<DepartureSection> sections;
 
@@ -876,13 +975,95 @@ class _LiveNextBusSpotlightCard extends StatelessWidget {
   });
 
   @override
+  State<_LiveNextBusSpotlightCard> createState() =>
+      _LiveNextBusSpotlightCardState();
+}
+
+class _LiveNextBusSpotlightCardState extends State<_LiveNextBusSpotlightCard> {
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTicker();
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  /// One-second cadence so the countdown reads like a clock, and so the card
+  /// rolls over to the following bus on its own the moment one departs. The
+  /// rebuild is a cheap subtree (no layout thrash) and the timer is cancelled
+  /// in [dispose], so it can't outlive the screen.
+  void _startTicker() {
+    _ticker?.cancel();
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  DateTime get _now => debugNextDepartureClock?.call() ?? DateTime.now();
+
+  @override
   Widget build(BuildContext context) {
-    if (sections.isEmpty || sections.first.trips.isEmpty) {
+    final sections = widget.sections;
+    final route = widget.route;
+
+    if (sections.isEmpty || sections.every((s) => s.trips.isEmpty)) {
       return const SizedBox.shrink();
     }
 
-    final sec = sections.first;
-    final trip = sec.trips.first;
+    final now = _now;
+    final next = resolveNextDeparture(sections, now: now);
+
+    // Every trip label was unparseable (bad live data). Rather than show a
+    // wrong "next bus", fall back to the old first-row behaviour.
+    if (next == null) {
+      final fallbackSection =
+          sections.firstWhere((s) => s.trips.isNotEmpty);
+      return _buildCard(
+        context,
+        departurePlace: fallbackSection.departurePlace,
+        trip: fallbackSection.trips.first,
+        countdownLabel: null,
+        isTomorrow: false,
+        isBoarding: false,
+        routeName: route.routeName,
+        routeId: route.id,
+      );
+    }
+
+    final remaining = next.timeUntil(now);
+    return _buildCard(
+      context,
+      departurePlace: next.departurePlace,
+      trip: next.trip,
+      countdownLabel: formatCountdown(remaining),
+      isTomorrow: next.isTomorrow,
+      // Within a minute either side of departure: the bus is at the stop now.
+      isBoarding: remaining.inSeconds <= 0,
+      routeName: route.routeName,
+      routeId: route.id,
+    );
+  }
+
+  Widget _buildCard(
+    BuildContext context, {
+    required String departurePlace,
+    required BusTripItem trip,
+    required String? countdownLabel,
+    required bool isTomorrow,
+    required bool isBoarding,
+    required String routeName,
+    required String routeId,
+  }) {
+    // Flips to green the moment the bus is due, so the card's colour alone
+    // tells you whether you still have time to walk over.
+    final accent =
+        isBoarding ? context.colors.success : context.colors.primary;
 
     return GlassCard(
       gradient: context.isLight
@@ -896,32 +1077,30 @@ class _LiveNextBusSpotlightCard extends StatelessWidget {
               end: Alignment.bottomRight,
               colors: [Color(0x332E7DF6), Color(0x18141C2E)],
             ),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(13),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                 decoration: BoxDecoration(
-                  color: context.colors.primary.withValues(alpha: 0.18),
+                  color: accent.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                      color: context.colors.primary.withValues(alpha: 0.5)),
+                  border: Border.all(color: accent.withValues(alpha: 0.5)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.bolt_rounded,
-                        size: 15, color: context.colors.primary),
+                    Icon(Icons.bolt_rounded, size: 15, color: accent),
                     const SizedBox(width: 4),
                     Text(
-                      'NEXT DEPARTURE SPOTLIGHT',
+                      isBoarding ? 'DEPARTING NOW' : 'NEXT DEPARTURE',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
-                        color: context.colors.primary,
+                        color: accent,
                         letterSpacing: 0.5,
                       ),
                     ),
@@ -929,32 +1108,80 @@ class _LiveNextBusSpotlightCard extends StatelessWidget {
                 ),
               ),
               const Spacer(),
-              Icon(Icons.directions_bus_filled_rounded,
-                  color: context.colors.primary.withValues(alpha: 0.7), size: 22),
+              // The live countdown — the piece that makes this card feel
+              // "alive" instead of a frozen timetable row.
+              if (countdownLabel != null)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: accent,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.timer_outlined,
+                          size: 14, color: Colors.white),
+                      const SizedBox(width: 4),
+                      Text(
+                        isBoarding ? 'At the stop' : 'in $countdownLabel',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                Icon(Icons.directions_bus_filled_rounded,
+                    color: context.colors.primary.withValues(alpha: 0.7),
+                    size: 22),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(
-                trip.time,
-                style: TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800,
-                  color: context.colors.textPrimary,
-                ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    trip.time,
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: context.colors.textPrimary,
+                    ),
+                  ),
+                  // After the last bus of the day, be explicit that this one
+                  // leaves tomorrow rather than implying it's still coming.
+                  if (isTomorrow)
+                    Text(
+                      'Tomorrow',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: context.colors.textMuted,
+                      ),
+                    ),
+                ],
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Leaving from: ${sec.departurePlace}',
+                      'From $departurePlace',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontWeight: FontWeight.w700,
-                        fontSize: 14.5,
+                        fontSize: 13,
                         color: context.colors.primary,
                       ),
                     ),
@@ -966,58 +1193,13 @@ class _LiveNextBusSpotlightCard extends StatelessWidget {
                   ],
                 ),
               ),
-              Pressable(
-                onTap: () {
-                  final tripId = _tripId(route.id, sec.departurePlace, trip.time);
-                  showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    backgroundColor: Colors.transparent,
-                    builder: (ctx) => BusAlarmPickerModal(
-                      tripId: tripId,
-                      routeName: route.routeName,
-                      departurePlace: sec.departurePlace,
-                      tripTime: trip.time,
-                      busName: trip.busName,
-                    ),
-                  ).then((result) {
-                    if (!context.mounted) return;
-                    if (result is ScheduledBusAlarmInfo) {
-                      showToast(context, 'Alarm set for ${result.tripTime} (${result.leadMinutes} mins before)');
-                    }
-                  });
-                },
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: context.colors.primary,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: context.colors.primary.withValues(alpha: 0.35),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      Icon(Icons.alarm_add_rounded,
-                          size: 17, color: Colors.white),
-                      SizedBox(width: 6),
-                      Text(
-                        'Set Alarm',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              _TripAlarmButton(
+                tripId: _tripId(routeId, departurePlace, trip.time),
+                routeName: routeName,
+                departurePlace: departurePlace,
+                tripTime: trip.time,
+                busName: trip.busName,
+                dense: false,
               ),
             ],
           ),
@@ -1286,6 +1468,11 @@ class _RouteButton extends StatelessWidget {
   }
 }
 
+/// Bus operator chips ("BRTC, সুগন্ধা").
+///
+/// Each chip is capped to the width actually available and ellipsised. Without
+/// that cap a single long operator name renders wider than its card and spills
+/// out the side — the "leaking bus name" the schedule used to show.
 class _BusNamePillTags extends StatelessWidget {
   final String busNameString;
   final bool isSmall;
@@ -1302,45 +1489,235 @@ class _BusNamePillTags extends StatelessWidget {
 
     if (parts.isEmpty) return const SizedBox.shrink();
 
-    return Wrap(
-      spacing: 6,
-      runSpacing: 5,
-      children: parts.map((name) {
-        final isBrtc = name.toUpperCase().contains('BRTC') ||
-            name.contains('বিআরটিসি');
-        final tagColor = isBrtc ? context.colors.primary : context.colors.accentCyan;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Finite in every current call site (all are inside an Expanded), but
+        // guard anyway so the chip can't grow unbounded in a future layout.
+        final maxPillWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : double.infinity;
 
-        return Container(
-          padding: EdgeInsets.symmetric(
-              horizontal: isSmall ? 8 : 10, vertical: isSmall ? 3 : 5),
-          decoration: BoxDecoration(
-            color: tagColor.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: tagColor.withValues(alpha: 0.35)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                isBrtc ? Icons.directions_bus_rounded : Icons.commute_rounded,
-                size: isSmall ? 12 : 13.5,
-                color: tagColor,
-              ),
-              const SizedBox(width: 5),
-              Text(
-                name,
-                style: TextStyle(
-                  color: tagColor,
-                  fontWeight: FontWeight.w700,
-                  fontSize: isSmall ? 11.5 : 13,
+        return Wrap(
+          spacing: 6,
+          runSpacing: 4,
+          children: parts.map((name) {
+            final isBrtc = name.toUpperCase().contains('BRTC') ||
+                name.contains('বিআরটিসি');
+            final tagColor =
+                isBrtc ? context.colors.primary : context.colors.accentCyan;
+
+            return ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxPillWidth),
+              child: Container(
+                padding: EdgeInsets.symmetric(
+                    horizontal: isSmall ? 7 : 9, vertical: isSmall ? 2.5 : 4),
+                decoration: BoxDecoration(
+                  color: tagColor.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: tagColor.withValues(alpha: 0.35)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isBrtc
+                          ? Icons.directions_bus_rounded
+                          : Icons.commute_rounded,
+                      size: isSmall ? 11.5 : 13,
+                      color: tagColor,
+                    ),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        softWrap: false,
+                        style: TextStyle(
+                          color: tagColor,
+                          fontWeight: FontWeight.w700,
+                          fontSize: isSmall ? 11 : 12.5,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
+            );
+          }).toList(),
         );
-      }).toList(),
+      },
     );
   }
+}
+
+/// Trip ids that currently have an armed alarm, shared by every "Set Alarm"
+/// entry point on this screen.
+///
+/// The schedule renders dozens of rows plus the spotlight card; reading
+/// SharedPreferences from each one would be wasteful and would leave the others
+/// stale after a set or cancel. One notifier keeps them all in agreement.
+final BusAlarmRegistry busAlarmRegistry = BusAlarmRegistry();
+
+@visibleForTesting
+class BusAlarmRegistry extends ValueNotifier<Map<String, ScheduledBusAlarmInfo>> {
+  BusAlarmRegistry() : super(const {});
+
+  /// Re-reads stored alarms. Elapsed ones are dropped so a row can't advertise
+  /// an alarm that already rang.
+  Future<void> refresh() async {
+    try {
+      final alarms = await BusAlarmService.instance.getScheduledAlarms();
+      final now = DateTime.now();
+      value = {
+        for (final alarm in alarms)
+          if (alarm.scheduledRingTime.isAfter(now)) alarm.id: alarm,
+      };
+    } catch (_) {
+      // No storage on this host (unit-test binding): keep what we had rather
+      // than blanking every row's state.
+    }
+  }
+}
+
+/// "Set alarm" / "alarm armed" control for one trip.
+///
+/// Every row used to render the same neutral bell whether or not an alarm was
+/// set, so the only way to find an alarm you had already made was to open each
+/// trip in turn. Armed trips now read as armed, and tapping opens the same
+/// sheet in its edit/cancel form.
+class _TripAlarmButton extends StatelessWidget {
+  final String tripId;
+  final String routeName;
+  final String departurePlace;
+  final String tripTime;
+  final String busName;
+
+  /// Icon-sized for dense timetable rows; labelled for the spotlight hero.
+  final bool dense;
+
+  const _TripAlarmButton({
+    required this.tripId,
+    required this.routeName,
+    required this.departurePlace,
+    required this.tripTime,
+    required this.busName,
+    this.dense = true,
+  });
+
+  Future<void> _openPicker(BuildContext context) async {
+    final result = await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => BusAlarmPickerModal(
+        tripId: tripId,
+        routeName: routeName,
+        departurePlace: departurePlace,
+        tripTime: tripTime,
+        busName: busName,
+      ),
+    );
+
+    // Re-read before touching the UI so every entry point flips at once.
+    await busAlarmRegistry.refresh();
+    if (!context.mounted) return;
+    if (result is ScheduledBusAlarmInfo) {
+      showToast(context,
+          'Alarm set for ${result.tripTime} (${result.leadMinutes} mins before)');
+    } else if (result == false) {
+      showToast(context, 'Alarm cancelled');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<Map<String, ScheduledBusAlarmInfo>>(
+      valueListenable: busAlarmRegistry,
+      builder: (context, alarms, _) {
+        final alarm = alarms[tripId];
+        final isArmed = alarm != null;
+        final accent =
+            isArmed ? context.colors.success : context.colors.primary;
+        final tooltip = isArmed
+            ? 'Alarm rings ${_formatClock(alarm.scheduledRingTime)} '
+                '(${alarm.leadMinutes} min before) · tap to edit'
+            : 'Set alarm for $tripTime';
+
+        return Tooltip(
+          message: tooltip,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => _openPicker(context),
+              borderRadius: BorderRadius.circular(10),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: EdgeInsets.symmetric(
+                  horizontal: dense ? 8 : 11,
+                  vertical: dense ? 6 : 8,
+                ),
+                decoration: BoxDecoration(
+                  // Armed rows get a solid fill so they stand out down a long
+                  // list; unarmed stay quiet.
+                  color: isArmed
+                      ? accent.withValues(alpha: dense ? 0.16 : 1.0)
+                      : (dense ? Colors.transparent : accent),
+                  borderRadius: BorderRadius.circular(10),
+                  border: isArmed && dense
+                      ? Border.all(color: accent.withValues(alpha: 0.55))
+                      : null,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isArmed
+                          ? Icons.alarm_on_rounded
+                          : Icons.alarm_add_rounded,
+                      size: dense ? 16 : 15,
+                      color: dense
+                          ? accent
+                          : (isArmed ? Colors.white : Colors.white),
+                    ),
+                    if (isArmed && dense) ...[
+                      const SizedBox(width: 4),
+                      Text(
+                        '${alarm.leadMinutes}m',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: accent,
+                        ),
+                      ),
+                    ],
+                    if (!dense) ...[
+                      const SizedBox(width: 5),
+                      Text(
+                        isArmed ? 'Edit' : 'Alarm',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// "7:15 AM" for an alarm's ring time.
+String _formatClock(DateTime time) {
+  final hour = time.hour % 12 == 0 ? 12 : time.hour % 12;
+  final minute = time.minute.toString().padLeft(2, '0');
+  return '$hour:$minute ${time.hour < 12 ? 'AM' : 'PM'}';
 }
 
 class _DepartureSectionCard extends StatelessWidget {
@@ -1391,7 +1768,7 @@ class _DepartureSectionCard extends StatelessWidget {
         children: [
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
             decoration: BoxDecoration(
               color: context.colors.primary.withValues(alpha: 0.14),
               borderRadius:
@@ -1399,52 +1776,15 @@ class _DepartureSectionCard extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: context.colors.primary,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(Icons.location_on_rounded,
-                      size: 16, color: Colors.white),
-                ),
-                const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'DEPARTURE POINT',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 10.5,
-                        letterSpacing: 0.6,
-                        color: context.colors.primary.withValues(alpha: 0.85),
-                      ),
-                    ),
-                    const SizedBox(height: 1),
-                    Text(
-                      section.departurePlace,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 16.5,
-                        color: context.colors.primary,
-                      ),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: context.colors.primary.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                Icon(Icons.location_on_rounded,
+                    size: 15, color: context.colors.primary),
+                const SizedBox(width: 8),
+                Expanded(
                   child: Text(
-                    '${section.trips.length} Trips Scheduled',
+                    section.departurePlace,
                     style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
                       color: context.colors.primary,
                     ),
                   ),
@@ -1513,15 +1853,15 @@ class _TripGroupSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
           child: Row(
             children: [
-              Icon(icon, size: 16, color: iconColor),
-              const SizedBox(width: 7),
+              Icon(icon, size: 14, color: iconColor),
+              const SizedBox(width: 6),
               Text(
                 title,
                 style: TextStyle(
-                  fontSize: 13,
+                  fontSize: 12,
                   fontWeight: FontWeight.w700,
                   color: context.colors.textSecondary,
                 ),
@@ -1530,7 +1870,7 @@ class _TripGroupSection extends StatelessWidget {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 14),
           child: Column(
             children: List.generate(trips.length, (index) {
               final trip = trips[index];
@@ -1538,60 +1878,40 @@ class _TripGroupSection extends StatelessWidget {
               return Column(
                 children: [
                   Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    padding: const EdgeInsets.symmetric(vertical: 7),
                     child: Row(
                       children: [
                         ConstrainedBox(
-                          constraints: const BoxConstraints(minWidth: 88),
+                          constraints: const BoxConstraints(minWidth: 72),
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 7),
+                                horizontal: 8, vertical: 5),
                             alignment: Alignment.center,
                             decoration: BoxDecoration(
                               color:
                                   context.colors.primary.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(10),
+                              borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
                               trip.time,
                               style: TextStyle(
                                 fontWeight: FontWeight.w800,
-                                fontSize: 14,
+                                fontSize: 13,
                                 color: context.colors.primary,
                               ),
                             ),
                           ),
                         ),
-                        const SizedBox(width: 14),
+                        const SizedBox(width: 10),
                         Expanded(
-                          child: _BusNamePillTags(busNameString: trip.busName),
+                          child: _BusNamePillTags(busNameString: trip.busName, isSmall: true),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.alarm_add_rounded, size: 20),
-                          color: context.colors.primary,
-                          tooltip: 'Set Alarm for ${trip.time}',
-                          onPressed: () {
-                            final tripId = _tripId(routeId, departurePlace, trip.time);
-                            showModalBottomSheet(
-                              context: context,
-                              isScrollControlled: true,
-                              backgroundColor: Colors.transparent,
-                              builder: (ctx) => BusAlarmPickerModal(
-                                tripId: tripId,
-                                routeName: routeName,
-                                departurePlace: departurePlace,
-                                tripTime: trip.time,
-                                busName: trip.busName,
-                              ),
-                            ).then((result) {
-                              if (!context.mounted) return;
-                              if (result is ScheduledBusAlarmInfo) {
-                                showToast(context, 'Alarm set for ${result.tripTime} (${result.leadMinutes} mins before)');
-                              } else if (result == false) {
-                                showToast(context, 'Alarm cancelled');
-                              }
-                            });
-                          },
+                        _TripAlarmButton(
+                          tripId: _tripId(routeId, departurePlace, trip.time),
+                          routeName: routeName,
+                          departurePlace: departurePlace,
+                          tripTime: trip.time,
+                          busName: trip.busName,
                         ),
                       ],
                     ),
@@ -1607,8 +1927,96 @@ class _TripGroupSection extends StatelessWidget {
             }),
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 4),
       ],
+    );
+  }
+}
+
+/// Collapsible stop summary — collapsed by default to save space.
+class _RouteStopsSummary extends StatefulWidget {
+  final String routeName;
+  final String stops;
+  final VoidCallback? onShowMap;
+
+  const _RouteStopsSummary({
+    required this.routeName,
+    required this.stops,
+    this.onShowMap,
+  });
+
+  @override
+  State<_RouteStopsSummary> createState() => _RouteStopsSummaryState();
+}
+
+class _RouteStopsSummaryState extends State<_RouteStopsSummary> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: context.colors.surfaceAlt,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: context.colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Icon(Icons.alt_route_rounded,
+                      size: 16, color: context.colors.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${widget.routeName} Stops',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13.5,
+                        color: context.colors.primary,
+                      ),
+                    ),
+                  ),
+                  if (widget.onShowMap != null)
+                    TextButton.icon(
+                      onPressed: widget.onShowMap,
+                      icon: const Icon(Icons.map_outlined, size: 14),
+                      label: const Text('Map', style: TextStyle(fontSize: 11.5)),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  Icon(
+                    _expanded
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    size: 20,
+                    color: context.colors.textSecondary,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Text(
+                widget.stops,
+                style: const TextStyle(fontSize: 13, height: 1.4),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
