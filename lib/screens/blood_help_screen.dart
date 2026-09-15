@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 
 import '../bloc/blood_bloc.dart';
 import '../di/di.dart';
 import '../models/models.dart';
+import '../navigation/app_router.dart';
 import '../repositories/blood_repository.dart';
+import '../supabase/session_controller.dart';
+import '../supabase/supabase_config.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/login_gate.dart';
 import '../widgets/motion.dart';
 
 class BloodHelpScreen extends StatelessWidget {
@@ -15,7 +20,8 @@ class BloodHelpScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
-      create: (_) => BloodBloc(getIt<BloodRepository>())..add(const BloodStarted()),
+      create: (_) =>
+          BloodBloc(getIt<BloodRepository>())..add(const BloodStarted()),
       child: const _BloodHelpView(),
     );
   }
@@ -36,6 +42,7 @@ class _BloodHelpViewState extends State<_BloodHelpView> {
   }
 
   Future<void> _openRequestForm() async {
+    if (!requireSignIn(context, 'Blood requests')) return;
     final created = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -59,16 +66,48 @@ class _BloodHelpViewState extends State<_BloodHelpView> {
     if (result == 'fulfilled') {
       showToast(context, 'Request marked as fulfilled — thank you!');
     } else if (result == 'responded') {
-      showToast(context, 'Response sent — the requester can now see your contact');
+      showToast(
+        context,
+        'Response sent — the requester can now see your contact',
+      );
     }
     await _refresh();
   }
+
+  Future<void> _openDonorRegistration() async {
+    if (!requireSignIn(context, 'Donor registration')) return;
+    BloodDonorRegistration? existing;
+    try {
+      existing = await getIt<BloodRepository>().fetchMyDonorRegistration();
+    } catch (_) {
+      if (mounted) showToast(context, 'Could not load your donor registration');
+      return;
+    }
+    if (!mounted) return;
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _DonorRegistrationSheet(existing: existing),
+    );
+    if (saved == true && mounted) {
+      showToast(
+        context,
+        existing == null ? 'Donor registration saved' : 'Donor profile updated',
+      );
+    }
+  }
+
+  Future<void> _openDonorRegistrationFromPanel() => _openDonorRegistration();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Blood Help', style: TextStyle(color: context.colors.textPrimary)),
+        title: Text(
+          'Blood Help',
+          style: TextStyle(color: context.colors.textPrimary),
+        ),
         backgroundColor: Colors.transparent,
         iconTheme: IconThemeData(color: context.colors.textPrimary),
       ),
@@ -79,12 +118,18 @@ class _BloodHelpViewState extends State<_BloodHelpView> {
             builder: (context, state) => SegmentedTabs(
               tabs: const ['Request Blood', 'Donate Blood'],
               selected: state.tab,
-              onChanged: (i) => context.read<BloodBloc>().add(BloodTabChanged(i)),
+              onChanged: (i) =>
+                  context.read<BloodBloc>().add(BloodTabChanged(i)),
             ),
           ),
           Expanded(
             child: BlocBuilder<BloodBloc, BloodState>(
               builder: (context, state) {
+                if (state.tab == 1) {
+                  return _DonorPanel(
+                    onRegister: _openDonorRegistrationFromPanel,
+                  );
+                }
                 final need = state.urgentNeed;
                 return RefreshIndicator(
                   color: context.colors.primary,
@@ -141,24 +186,503 @@ class _BloodHelpViewState extends State<_BloodHelpView> {
               },
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: BlocBuilder<BloodBloc, BloodState>(
-              buildWhen: (previous, current) => previous.tab != current.tab,
-              builder: (context, state) => PrimaryButton(
-                label: state.tab == 0 ? 'Request Blood' : 'Register as Donor',
-                icon: Icons.water_drop_rounded,
-                onPressed: () {
-                  if (state.tab == 0) {
-                    _openRequestForm();
-                  } else {
-                    _showComingSoonSheet(context, 'Donor registration');
-                  }
-                },
+          BlocBuilder<BloodBloc, BloodState>(
+            buildWhen: (previous, current) => previous.tab != current.tab,
+            builder: (context, state) => state.tab == 0
+                ? Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: PrimaryButton(
+                      label: 'Request Blood',
+                      icon: Icons.water_drop_rounded,
+                      onPressed: _openRequestForm,
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DonorRegistrationSheet extends StatefulWidget {
+  final BloodDonorRegistration? existing;
+
+  const _DonorRegistrationSheet({this.existing});
+
+  @override
+  State<_DonorRegistrationSheet> createState() =>
+      _DonorRegistrationSheetState();
+}
+
+class _DonorPanel extends StatefulWidget {
+  final Future<void> Function() onRegister;
+
+  const _DonorPanel({required this.onRegister});
+
+  @override
+  State<_DonorPanel> createState() => _DonorPanelState();
+}
+
+class _DonorPanelState extends State<_DonorPanel> {
+  BloodDonorRegistration? _registration;
+  bool _loading = true;
+  String? _error;
+  DateTime? _lastUpdatedAt;
+  late final SessionController _session = getIt<SessionController>();
+
+  bool get _requiresSignIn =>
+      SupabaseConfig.isConfigured && !_session.isSignedIn;
+
+  @override
+  void initState() {
+    super.initState();
+    _session.addListener(_sessionChanged);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _session.removeListener(_sessionChanged);
+    super.dispose();
+  }
+
+  void _sessionChanged() {
+    if (!mounted) return;
+    if (_requiresSignIn) {
+      setState(() {
+        _registration = null;
+        _loading = false;
+        _error = null;
+      });
+    } else {
+      _load();
+    }
+  }
+
+  Future<void> refresh() => _load();
+
+  Future<void> _load() async {
+    if (_requiresSignIn) {
+      setState(() {
+        _loading = false;
+        _error = null;
+        _registration = null;
+      });
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final registration = await getIt<BloodRepository>()
+          .fetchMyDonorRegistration();
+      if (!mounted) return;
+      setState(() {
+        _registration = registration;
+        _loading = false;
+        _lastUpdatedAt = DateTime.now();
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = 'Could not load your donor profile.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: const [
+          Skeleton(height: 260, radius: BorderRadius.all(Radius.circular(8))),
+          SizedBox(height: 14),
+          Skeleton(height: 14, width: 140),
+          SizedBox(height: 8),
+          Skeleton(height: 12, width: 260),
+        ],
+      );
+    }
+    if (_requiresSignIn) {
+      return RefreshIndicator(
+        color: context.colors.primary,
+        backgroundColor: context.colors.surfaceAlt,
+        onRefresh: _load,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          children: [
+            const SizedBox(height: 44),
+            const EmptyState(
+              icon: Icons.volunteer_activism_outlined,
+              title: 'Sign in to manage your donor profile',
+              message:
+                  'Save your blood group and availability, then respond privately to campus blood requests.',
+            ),
+            Center(
+              child: FilledButton.icon(
+                onPressed: () => context.push(AppRoutes.login),
+                icon: const Icon(Icons.login_rounded),
+                label: const Text('Sign in'),
+                style: FilledButton.styleFrom(minimumSize: const Size(120, 44)),
               ),
+            ),
+          ],
+        ),
+      );
+    }
+    if (_error != null && _registration == null) {
+      return RetryStateList(
+        title: 'Donor profile unavailable',
+        message: _error!,
+        onRetry: _load,
+      );
+    }
+
+    final registration = _registration;
+    return RefreshIndicator(
+      color: context.colors.primary,
+      backgroundColor: context.colors.surfaceAlt,
+      onRefresh: _load,
+      semanticsLabel: 'Refresh donor profile',
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: [
+          if (_error != null) ...[
+            DataStateBanner(
+              message:
+                  'Could not refresh your donor profile. Showing saved details.',
+              tone: DataStateTone.warning,
+              onRetry: _load,
+            ),
+            const SizedBox(height: 10),
+          ],
+          Align(
+            alignment: Alignment.centerRight,
+            child: LastUpdatedLabel(
+              updatedAt: _lastUpdatedAt,
+              emptyLabel: 'Donor profile not synced yet',
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: context.colors.surfaceAlt,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: context.colors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.volunteer_activism_rounded,
+                  color: context.colors.danger,
+                  size: 30,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  registration == null
+                      ? 'Help someone in your campus community'
+                      : 'Your donor profile',
+                  style: TextStyle(
+                    color: context.colors.textPrimary,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  registration == null
+                      ? 'Register your blood group and contact number. Only signed-in campus users can see an available listing, and your contact is used for in-app responses.'
+                      : 'Registered means your donor profile is saved. Available means signed-in campus users may respond through the app. Your contact is not shown in a public donor directory.',
+                  style: TextStyle(
+                    color: context.colors.textSecondary,
+                    fontSize: 13,
+                    height: 1.4,
+                  ),
+                ),
+                if (registration != null) ...[
+                  const SizedBox(height: 18),
+                  _DonorDetailRow(
+                    icon: Icons.how_to_reg_rounded,
+                    label: 'Registration',
+                    value: 'Registered',
+                    valueColor: context.colors.primary,
+                  ),
+                  _DonorDetailRow(
+                    icon: Icons.bloodtype_rounded,
+                    label: 'Blood group',
+                    value: registration.group.label,
+                  ),
+                  _DonorDetailRow(
+                    icon: registration.available
+                        ? Icons.visibility_rounded
+                        : Icons.visibility_off_rounded,
+                    label: 'Listing status',
+                    value: registration.available ? 'Available' : 'Paused',
+                    valueColor: registration.available
+                        ? context.colors.success
+                        : context.colors.textMuted,
+                  ),
+                  _DonorDetailRow(
+                    icon: Icons.calendar_month_outlined,
+                    label: 'Last donated',
+                    value: registration.lastDonated == null
+                        ? 'Not specified'
+                        : '${registration.lastDonated!.day}/${registration.lastDonated!.month}/${registration.lastDonated!.year}',
+                  ),
+                ],
+                const SizedBox(height: 18),
+                PrimaryButton(
+                  label: registration == null
+                      ? 'Register as Donor'
+                      : 'Edit Donor Profile',
+                  icon: registration == null
+                      ? Icons.add_rounded
+                      : Icons.edit_rounded,
+                  onPressed: () async {
+                    await widget.onRegister();
+                    if (mounted) await _load();
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Donor safety reminder',
+            style: TextStyle(
+              color: context.colors.textPrimary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            'Keep your last donation date accurate and pause availability after donating or whenever you cannot respond. Follow local blood-bank guidance for eligibility; the app does not determine medical eligibility.',
+            style: TextStyle(
+              color: context.colors.textSecondary,
+              fontSize: 12.5,
+              height: 1.4,
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _DonorDetailRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color? valueColor;
+
+  const _DonorDetailRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.valueColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: context.colors.textMuted),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(color: context.colors.textSecondary),
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              color: valueColor ?? context.colors.textPrimary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DonorRegistrationSheetState extends State<_DonorRegistrationSheet> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _contact;
+  late BloodGroup _group;
+  late bool _available;
+  DateTime? _lastDonated;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _contact = TextEditingController(text: widget.existing?.contact ?? '');
+    _group = widget.existing?.group ?? BloodGroup.oPositive;
+    _available = widget.existing?.available ?? true;
+    _lastDonated = widget.existing?.lastDonated;
+  }
+
+  @override
+  void dispose() {
+    _contact.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate() async {
+    final value = await showDatePicker(
+      context: context,
+      initialDate: _lastDonated ?? DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now(),
+    );
+    if (value != null) setState(() => _lastDonated = value);
+  }
+
+  Future<void> _save() async {
+    if (!(_formKey.currentState?.validate() ?? false) || _saving) return;
+    setState(() => _saving = true);
+    try {
+      await getIt<BloodRepository>().saveDonorRegistration(
+        BloodDonorRegistration(
+          group: _group,
+          contact: _contact.text.trim(),
+          lastDonated: _lastDonated,
+          available: _available,
+        ),
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _saving = false);
+        showToast(context, 'Could not save the donor registration');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: SafeArea(
+        child: SingleChildScrollView(
+          child: Container(
+            margin: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
+            decoration: cardDecoration(context: context),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.existing == null
+                        ? 'Register as Donor'
+                        : 'Update Donor Profile',
+                    style: TextStyle(
+                      color: context.colors.textPrimary,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Your profile is visible only to signed-in campus users when availability is on. Contact is shared through an in-app response flow.',
+                    style: TextStyle(
+                      color: context.colors.textSecondary,
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  DropdownButtonFormField<BloodGroup>(
+                    initialValue: _group,
+                    decoration: const InputDecoration(labelText: 'Blood group'),
+                    items: [
+                      for (final group in BloodGroup.values)
+                        DropdownMenuItem(
+                          value: group,
+                          child: Text(group.label),
+                        ),
+                    ],
+                    onChanged: (value) =>
+                        setState(() => _group = value ?? _group),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _contact,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: 'Contact number',
+                      prefixIcon: Icon(Icons.phone_outlined),
+                    ),
+                    validator: (value) => (value ?? '').trim().isEmpty
+                        ? 'Enter a contact number'
+                        : null,
+                  ),
+                  const SizedBox(height: 12),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.calendar_month_outlined),
+                    title: const Text('Last donated'),
+                    subtitle: Text(
+                      _lastDonated == null
+                          ? 'Not specified'
+                          : '${_lastDonated!.day}/${_lastDonated!.month}/${_lastDonated!.year}',
+                    ),
+                    trailing: _lastDonated == null
+                        ? null
+                        : IconButton(
+                            tooltip: 'Clear date',
+                            onPressed: () =>
+                                setState(() => _lastDonated = null),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                    onTap: _pickDate,
+                  ),
+                  Text(
+                    'Please keep this date accurate so you can check your own eligibility with a qualified blood bank.',
+                    style: TextStyle(
+                      color: context.colors.textMuted,
+                      fontSize: 11.5,
+                      height: 1.35,
+                    ),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Available to donate'),
+                    subtitle: const Text(
+                      'Your donor listing appears when availability is on.',
+                    ),
+                    value: _available,
+                    onChanged: (value) => setState(() => _available = value),
+                  ),
+                  const SizedBox(height: 14),
+                  PrimaryButton(
+                    label: _saving ? 'Saving...' : 'Save Donor Profile',
+                    icon: Icons.volunteer_activism_rounded,
+                    onPressed: _saving ? null : _save,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -194,7 +718,11 @@ class _UrgentNeedCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.water_drop_rounded, color: Colors.white, size: 30),
+              const Icon(
+                Icons.water_drop_rounded,
+                color: Colors.white,
+                size: 30,
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -301,7 +829,9 @@ class _RequestBloodSheetState extends State<_RequestBloodSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: SafeArea(
         child: SingleChildScrollView(
           child: Container(
@@ -328,10 +858,16 @@ class _RequestBloodSheetState extends State<_RequestBloodSheet> {
                       Expanded(
                         child: DropdownButtonFormField<BloodGroup>(
                           initialValue: _group,
-                          decoration: const InputDecoration(labelText: 'Blood group'),
+                          decoration: const InputDecoration(
+                            labelText: 'Blood group',
+                          ),
                           items: BloodGroup.values
-                              .map((g) => DropdownMenuItem(
-                                  value: g, child: Text(g.label)))
+                              .map(
+                                (g) => DropdownMenuItem(
+                                  value: g,
+                                  child: Text(g.label),
+                                ),
+                              )
                               .toList(),
                           onChanged: (g) =>
                               setState(() => _group = g ?? _group),
@@ -343,10 +879,15 @@ class _RequestBloodSheetState extends State<_RequestBloodSheet> {
                           initialValue: _units,
                           decoration: const InputDecoration(labelText: 'Units'),
                           items: List.generate(6, (i) => i + 1)
-                              .map((u) =>
-                                  DropdownMenuItem(value: u, child: Text('$u')))
+                              .map(
+                                (u) => DropdownMenuItem(
+                                  value: u,
+                                  child: Text('$u'),
+                                ),
+                              )
                               .toList(),
-                          onChanged: (u) => setState(() => _units = u ?? _units),
+                          onChanged: (u) =>
+                              setState(() => _units = u ?? _units),
                         ),
                       ),
                     ],
@@ -355,7 +896,8 @@ class _RequestBloodSheetState extends State<_RequestBloodSheet> {
                   TextFormField(
                     controller: _location,
                     decoration: const InputDecoration(
-                        labelText: 'Location (hospital, ward…)'),
+                      labelText: 'Location (hospital, ward…)',
+                    ),
                     validator: (v) => (v == null || v.trim().isEmpty)
                         ? 'Where is the blood needed?'
                         : null,
@@ -364,8 +906,9 @@ class _RequestBloodSheetState extends State<_RequestBloodSheet> {
                   TextFormField(
                     controller: _contact,
                     keyboardType: TextInputType.phone,
-                    decoration:
-                        const InputDecoration(labelText: 'Contact number'),
+                    decoration: const InputDecoration(
+                      labelText: 'Contact number',
+                    ),
                     validator: (v) => (v == null || v.trim().isEmpty)
                         ? 'How can donors reach you?'
                         : null,
@@ -373,15 +916,18 @@ class _RequestBloodSheetState extends State<_RequestBloodSheet> {
                   const SizedBox(height: AppSpacing.sm),
                   TextFormField(
                     controller: _note,
-                    decoration:
-                        const InputDecoration(labelText: 'Note (optional)'),
+                    decoration: const InputDecoration(
+                      labelText: 'Note (optional)',
+                    ),
                   ),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(
                       'Urgent',
                       style: TextStyle(
-                          color: context.colors.textPrimary, fontSize: 14),
+                        color: context.colors.textPrimary,
+                        fontSize: 14,
+                      ),
                     ),
                     value: _urgent,
                     onChanged: (v) => setState(() => _urgent = v),
@@ -496,7 +1042,9 @@ class _RequestDetailSheetState extends State<_RequestDetailSheet> {
   Widget build(BuildContext context) {
     final request = widget.request;
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: SafeArea(
         child: SingleChildScrollView(
           child: Container(
@@ -555,7 +1103,9 @@ class _RequestDetailSheetState extends State<_RequestDetailSheet> {
                   Text(
                     request.note,
                     style: TextStyle(
-                        color: context.colors.textSecondary, fontSize: 13),
+                      color: context.colors.textSecondary,
+                      fontSize: 13,
+                    ),
                   ),
                 ],
                 const SizedBox(height: AppSpacing.lg),
@@ -578,15 +1128,19 @@ class _RequestDetailSheetState extends State<_RequestDetailSheet> {
                 ] else if (request.responded)
                   Row(
                     children: [
-                      Icon(Icons.check_circle_rounded,
-                          color: context.colors.success, size: 20),
+                      Icon(
+                        Icons.check_circle_rounded,
+                        color: context.colors.success,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'You already responded to this request.',
                           style: TextStyle(
-                              color: context.colors.textSecondary,
-                              fontSize: 13),
+                            color: context.colors.textSecondary,
+                            fontSize: 13,
+                          ),
                         ),
                       ),
                     ],
@@ -604,14 +1158,16 @@ class _RequestDetailSheetState extends State<_RequestDetailSheet> {
                   TextField(
                     controller: _contact,
                     keyboardType: TextInputType.phone,
-                    decoration:
-                        const InputDecoration(labelText: 'Your contact number'),
+                    decoration: const InputDecoration(
+                      labelText: 'Your contact number',
+                    ),
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   TextField(
                     controller: _message,
                     decoration: const InputDecoration(
-                        labelText: 'Message (optional)'),
+                      labelText: 'Message (optional)',
+                    ),
                   ),
                   const SizedBox(height: AppSpacing.md),
                   PrimaryButton(
@@ -649,8 +1205,7 @@ class _ResponsesList extends StatelessWidget {
         if (responses.isEmpty) {
           return Text(
             'No responses yet. Donors who answer will show up here.',
-            style:
-                TextStyle(color: context.colors.textSecondary, fontSize: 13),
+            style: TextStyle(color: context.colors.textSecondary, fontSize: 13),
           );
         }
         return Column(
@@ -665,94 +1220,52 @@ class _ResponsesList extends StatelessWidget {
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
-            ...responses.map((r) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: context.colors.surfaceAlt,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: context.colors.border),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${r.responderName}${r.contact.isNotEmpty ? ' · ${r.contact}' : ''}',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13,
-                            color: context.colors.textPrimary,
-                          ),
-                        ),
-                        if (r.message.isNotEmpty)
-                          Text(
-                            r.message,
-                            style: TextStyle(
-                                color: context.colors.textSecondary,
-                                fontSize: 12.5),
-                          ),
-                        Text(
-                          r.time,
-                          style: TextStyle(
-                              color: context.colors.textMuted, fontSize: 11),
-                        ),
-                      ],
-                    ),
+            ...responses.map(
+              (r) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: context.colors.surfaceAlt,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: context.colors.border),
                   ),
-                )),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${r.responderName}${r.contact.isNotEmpty ? ' · ${r.contact}' : ''}',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          color: context.colors.textPrimary,
+                        ),
+                      ),
+                      if (r.message.isNotEmpty)
+                        Text(
+                          r.message,
+                          style: TextStyle(
+                            color: context.colors.textSecondary,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                      Text(
+                        r.time,
+                        style: TextStyle(
+                          color: context.colors.textMuted,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ],
         );
       },
     );
   }
-}
-
-/// Honest "coming soon" affordance instead of a fake success toast.
-void _showComingSoonSheet(BuildContext context, String featureName) {
-  showModalBottomSheet<void>(
-    context: context,
-    backgroundColor: Colors.transparent,
-    builder: (sheetContext) => SafeArea(
-      child: Container(
-        margin: const EdgeInsets.all(AppSpacing.lg),
-        padding: const EdgeInsets.all(AppSpacing.xl),
-        decoration: cardDecoration(context: sheetContext),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.hourglass_top_rounded,
-                color: sheetContext.colors.primary, size: 36),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              '$featureName coming soon',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 16,
-                color: sheetContext.colors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              'This feature is not available yet. We are working on it — check back in a future update.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: sheetContext.colors.textSecondary,
-                fontSize: 13,
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            PrimaryButton(
-              label: 'Got it',
-              icon: Icons.check_rounded,
-              onPressed: () => Navigator.of(sheetContext).pop(),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
 }
 
 class _BloodSkeletonList extends StatelessWidget {
@@ -773,7 +1286,11 @@ class _BloodSkeletonList extends StatelessWidget {
           ),
           child: const Row(
             children: [
-              Skeleton(height: 30, width: 30, radius: BorderRadius.all(Radius.circular(15))),
+              Skeleton(
+                height: 30,
+                width: 30,
+                radius: BorderRadius.all(Radius.circular(15)),
+              ),
               SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -806,7 +1323,11 @@ class _BloodSkeletonList extends StatelessWidget {
               ),
               child: const Row(
                 children: [
-                  Skeleton(height: 42, width: 42, radius: BorderRadius.all(Radius.circular(11))),
+                  Skeleton(
+                    height: 42,
+                    width: 42,
+                    radius: BorderRadius.all(Radius.circular(11)),
+                  ),
                   SizedBox(width: 12),
                   Expanded(child: Skeleton(height: 14, width: 140)),
                   SizedBox(width: 12),
@@ -890,7 +1411,10 @@ class _RequestRow extends StatelessWidget {
               ),
               Text(
                 request.time,
-                style: TextStyle(color: context.colors.textMuted, fontSize: 11.5),
+                style: TextStyle(
+                  color: context.colors.textMuted,
+                  fontSize: 11.5,
+                ),
               ),
             ],
           ),

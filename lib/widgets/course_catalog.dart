@@ -22,6 +22,14 @@ class CourseCatalogView extends StatefulWidget {
   final ValueChanged<CourseOffering>? onEdit;
   final ValueChanged<CourseOffering>? onDelete;
 
+  /// Set when the last course read failed. With no cached courses this becomes
+  /// a full retry state; with courses already on screen it degrades to a banner
+  /// over the stale list, so a failed refresh never silently looks like "empty".
+  final String? errorMessage;
+
+  /// When the courses on screen were last read successfully.
+  final DateTime? lastUpdatedAt;
+
   /// Controlled term selection. When [selectedTerm]/[onTermSelected] are
   /// provided, the parent owns the selected term (e.g. it renders the semester
   /// history button in its AppBar) and the view hides its own inline history
@@ -40,6 +48,8 @@ class CourseCatalogView extends StatefulWidget {
     required this.onOpen,
     this.onEdit,
     this.onDelete,
+    this.errorMessage,
+    this.lastUpdatedAt,
     this.selectedTerm,
     this.onTermSelected,
   });
@@ -84,6 +94,33 @@ class _CourseCatalogViewState extends State<CourseCatalogView> {
     }
   }
 
+  /// Shared "refresh failed / last updated" strip used by every branch of the
+  /// catalog, so a stale list, an empty term and a full list all report their
+  /// freshness the same way.
+  Widget _freshnessHeader() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (widget.errorMessage != null) ...[
+          DataStateBanner(
+            message:
+                'Could not refresh your courses. Showing the last loaded list.',
+            tone: DataStateTone.warning,
+            onRetry: widget.onRefresh,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
+        Align(
+          alignment: Alignment.centerRight,
+          child: LastUpdatedLabel(
+            updatedAt: widget.lastUpdatedAt,
+            emptyLabel: 'Courses not synced yet',
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final profile = getIt<SessionController>().profile;
@@ -118,11 +155,19 @@ class _CourseCatalogViewState extends State<CourseCatalogView> {
       semanticsLabel: 'Refresh courses',
       child: widget.isLoading
           ? const _CourseSkeletonList()
-          : filteredCourses.isEmpty && widget.courses.isNotEmpty
+          : widget.errorMessage != null && widget.courses.isEmpty
+              ? RetryStateList(
+                  title: 'Courses unavailable',
+                  message: widget.errorMessage!,
+                  onRetry: widget.onRefresh,
+                )
+              : filteredCourses.isEmpty && widget.courses.isNotEmpty
               ? ListView(
                   physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(AppSpacing.lg),
                   children: [
-                    const SizedBox(height: 120),
+                    _freshnessHeader(),
+                    const SizedBox(height: 92),
 
                     EmptyState(
                       icon: widget.emptyIcon,
@@ -136,8 +181,10 @@ class _CourseCatalogViewState extends State<CourseCatalogView> {
               : filteredCourses.isEmpty
               ? ListView(
                   physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(AppSpacing.lg),
                   children: [
-                    const SizedBox(height: 120),
+                    _freshnessHeader(),
+                    const SizedBox(height: 92),
                     EmptyState(
                       icon: widget.emptyIcon,
                       title: 'No courses yet',
@@ -158,6 +205,8 @@ class _CourseCatalogViewState extends State<CourseCatalogView> {
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          _freshnessHeader(),
+                          const SizedBox(height: AppSpacing.md),
                           // The semester slider was removed by design: the app
                           // shows the current term by default and students jump
                           // to previous terms through the "View history" button.

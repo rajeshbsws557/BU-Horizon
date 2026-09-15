@@ -125,32 +125,45 @@ class PendingApprovalView extends StatelessWidget {
                               'to the batch.',
                         ),
                         const SizedBox(height: 14),
-                        _Step(
-                          icon: Icons.mark_email_read_outlined,
-                          color: context.colors.success,
-                          title: 'Or add your university email',
-                          subtitle:
-                              'Once your @bu.ac.bd email is issued, add it from '
-                              'your profile to verify instantly — no approval '
-                              'needed.',
-                        ),
+                        if (isProvisional)
+                          _Step(
+                            icon: Icons.mark_email_read_outlined,
+                            color: context.colors.success,
+                            title: 'Or add your university email',
+                            subtitle:
+                                'Once your @bu.ac.bd email is issued, add it from '
+                                'your profile to verify instantly — no approval '
+                                'needed.',
+                          )
+                        else
+                          _Step(
+                            icon: Icons.mark_email_read_outlined,
+                            color: context.colors.success,
+                            title: 'Or check your university email',
+                            subtitle:
+                                'Make sure the @bu.ac.bd address on your profile '
+                                'is correct — a verified university email '
+                                'unlocks your batch content without approval.',
+                          ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 22),
-                  if (isProvisional)
-                    FilledButton.icon(
-                      onPressed: () => context.push(AppRoutes.profile),
-                      icon: const Icon(Icons.person_outline_rounded, size: 18),
-                      label: const Text('Go to My Profile'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: context.colors.primary,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                  // Always reachable: this is the one screen a pending student
+                  // can act from, so it must never be a dead end.
+                  FilledButton.icon(
+                    onPressed: () => context.push(AppRoutes.profile),
+                    icon: const Icon(Icons.person_outline_rounded, size: 18),
+                    label: const Text('Go to My Profile'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: context.colors.primary,
+                      minimumSize: const Size(44, 48),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
                     ),
+                  ),
                 ],
               ),
             ),

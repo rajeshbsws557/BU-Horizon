@@ -43,6 +43,12 @@ class AttendanceSession {
   final String? endTime;
   final String topic;
   final AttendanceMark? status;
+  final String? recordId;
+  final String? correctionStatus;
+  final AttendanceMark? correctionRequestedStatus;
+  final String? correctionReason;
+  final DateTime? correctionRequestedAt;
+  final DateTime? correctionReviewedAt;
   final int? presentCount;
   final int? recordCount;
 
@@ -54,6 +60,12 @@ class AttendanceSession {
     this.endTime,
     this.topic = '',
     this.status,
+    this.recordId,
+    this.correctionStatus,
+    this.correctionRequestedStatus,
+    this.correctionReason,
+    this.correctionRequestedAt,
+    this.correctionReviewedAt,
     this.presentCount,
     this.recordCount,
   });
@@ -189,6 +201,12 @@ abstract interface class AttendanceRepository {
 
   Future<List<AttendanceSession>> fetchCourseSessions(String offeringId);
 
+  Future<void> requestCorrection({
+    required AttendanceSession session,
+    required AttendanceMark requestedStatus,
+    required String reason,
+  });
+
   Future<List<AttendanceRosterMember>> fetchSessionRoster({
     required String offeringId,
     String? sessionId,
@@ -210,7 +228,6 @@ abstract interface class AttendanceRepository {
     String? sessionId,
   });
 
-
   /// Compatibility API retained for existing home/tests while callers move
   /// to offering-based summaries.
   Future<List<CourseAttendance>> courseSummaries();
@@ -218,6 +235,11 @@ abstract interface class AttendanceRepository {
 
 @Injectable(as: AttendanceRepository)
 final class SampleAttendanceRepository implements AttendanceRepository {
+  final Map<String, String> _corrections = <String, String>{};
+  final Map<String, AttendanceMark> _correctionRequestedStatuses =
+      <String, AttendanceMark>{};
+  final Map<String, String> _correctionReasons = <String, String>{};
+  final Map<String, DateTime> _correctionTimes = <String, DateTime>{};
   final List<AttendanceRosterMember> _members = const [
     AttendanceRosterMember(
       profileId: 'sample-student-current',
@@ -328,6 +350,12 @@ final class SampleAttendanceRepository implements AttendanceRepository {
                 endTime: session.endTime,
                 topic: session.topic,
                 status: session.records['sample-student-current'],
+                recordId: 'sample-record-${session.id}',
+                correctionStatus: _corrections[session.id],
+                correctionRequestedStatus:
+                    _correctionRequestedStatuses[session.id],
+                correctionReason: _correctionReasons[session.id],
+                correctionRequestedAt: _correctionTimes[session.id],
                 presentCount: session.records.values
                     .where((status) => status == AttendanceMark.present)
                     .length,
@@ -337,6 +365,18 @@ final class SampleAttendanceRepository implements AttendanceRepository {
             .toList()
           ..sort((a, b) => b.date.compareTo(a.date));
     return List.unmodifiable(result);
+  }
+
+  @override
+  Future<void> requestCorrection({
+    required AttendanceSession session,
+    required AttendanceMark requestedStatus,
+    required String reason,
+  }) async {
+    _corrections[session.id] = 'pending';
+    _correctionRequestedStatuses[session.id] = requestedStatus;
+    _correctionReasons[session.id] = reason;
+    _correctionTimes[session.id] = DateTime.now();
   }
 
   @override
@@ -435,11 +475,12 @@ final class SampleAttendanceRepository implements AttendanceRepository {
     };
     final meta = courses[offeringId] ?? ('COURSE', 'Course');
 
-    final matching = _sessions
-        .where((s) => s.offeringId == offeringId)
-        .where((s) => sessionId == null || s.id == sessionId)
-        .toList()
-      ..sort((a, b) => a.date.compareTo(b.date));
+    final matching =
+        _sessions
+            .where((s) => s.offeringId == offeringId)
+            .where((s) => sessionId == null || s.id == sessionId)
+            .toList()
+          ..sort((a, b) => a.date.compareTo(b.date));
 
     final sessions = matching
         .map(

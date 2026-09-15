@@ -6,11 +6,19 @@ import 'package:go_router/go_router.dart';
 
 import '../bloc/home_cards_cubit.dart';
 import '../data/home_cards.dart';
+import '../data/university_bus_schedule_data.dart';
 import '../di/di.dart';
 import '../models/models.dart';
 import '../navigation/app_router.dart';
 import '../repositories/blood_repository.dart';
+import '../repositories/exam_repository.dart';
+import '../repositories/notice_repository.dart';
+import '../services/bus_schedule_controller.dart';
+import '../services/home_refresh_coordinator.dart';
+import '../services/home_refresh_state.dart';
+import '../services/notification_controller.dart';
 import '../supabase/session_controller.dart';
+import '../supabase/supabase_config.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/home_cards_customizer.dart';
@@ -43,19 +51,37 @@ class HomeScreen extends StatelessWidget {
     }
   }
 
-  static bool _isTabRoute(String route) => const {
-        AppRoutes.club,
-        AppRoutes.alerts,
-      }.contains(route);
-
+  static bool _isTabRoute(String route) =>
+      const {AppRoutes.club, AppRoutes.alerts}.contains(route);
 
   @override
   Widget build(BuildContext context) {
+    Future<void> refresh() async {
+      final snapshot = await HomeRefreshCoordinator(
+        notifications: getIt<NotificationController>(),
+        schedule: getIt<BusScheduleController>(),
+        bloodRepository: getIt<BloodRepository>(),
+        examRepository: getIt<ExamRepository>(),
+        noticeRepository: getIt<NoticeRepository>(),
+      ).refresh();
+      if (!context.mounted) return;
+      showToast(
+        context,
+        snapshot.health == HomeRefreshHealth.success
+            ? SupabaseConfig.isConfigured
+                  ? 'Home data refreshed'
+                  : 'Saved home data refreshed'
+            : snapshot.health == HomeRefreshHealth.failure
+            ? 'Could not refresh home data'
+            : 'Home partly refreshed. Some live data is unavailable.',
+      );
+    }
+
     return SafeArea(
       child: RefreshIndicator(
         color: context.colors.primary,
         backgroundColor: context.colors.surfaceAlt,
-        onRefresh: () async => Future<void>.delayed(const Duration(milliseconds: 600)),
+        onRefresh: refresh,
         child: LayoutBuilder(
           builder: (context, constraints) {
             final isWide = constraints.maxWidth > 768;
@@ -74,6 +100,8 @@ class HomeScreen extends StatelessWidget {
                           onBell: () => context.push(AppRoutes.notifications),
                         ),
                       ),
+                      const SizedBox(height: 6),
+                      const _HomeSyncState(),
 
                       const SizedBox(height: 16),
                       Entrance(
@@ -84,8 +112,13 @@ class HomeScreen extends StatelessWidget {
                       ),
                       const _UrgentBloodCard(),
                       const SizedBox(height: 22),
+                      // The live countdown is what a student opens this app for
+                      // on an ordinary morning, so it sits above the shortcut
+                      // grid rather than below the fold underneath it.
+                      const UpcomingSection(startIndex: 3),
+                      const SizedBox(height: 26),
                       Entrance(
-                        index: 3,
+                        index: 6,
                         child: _QuickAccessHeader(
                           onCustomize: () => showHomeCardsCustomizer(context),
                         ),
@@ -105,14 +138,15 @@ class HomeScreen extends StatelessWidget {
                           return GridView.builder(
                             gridDelegate:
                                 SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: isWide ? 4 : 2,
-                              mainAxisSpacing: 12,
-                              crossAxisSpacing: 12,
-                              mainAxisExtent: 110 *
-                                  MediaQuery.textScalerOf(context)
-                                      .scale(1.0)
-                                      .clamp(1.0, 1.6),
-                            ),
+                                  crossAxisCount: isWide ? 4 : 2,
+                                  mainAxisSpacing: 12,
+                                  crossAxisSpacing: 12,
+                                  mainAxisExtent:
+                                      110 *
+                                      MediaQuery.textScalerOf(
+                                        context,
+                                      ).scale(1.0).clamp(1.0, 1.6),
+                                ),
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
                             itemCount: cards.length,
@@ -120,7 +154,7 @@ class HomeScreen extends StatelessWidget {
                               final card = cards[i];
                               return Entrance(
                                 key: ValueKey('home-card-${card.id}'),
-                                index: 3 + i,
+                                index: 7 + i,
                                 child: _ActionCard(
                                   card: card,
                                   onTap: () => _open(context, card),
@@ -130,11 +164,6 @@ class HomeScreen extends StatelessWidget {
                           );
                         },
                       ),
-                      const SizedBox(height: 26),
-                      // Hero + compact rows: the next departure carries a live
-                      // countdown, so the section stays correct while the
-                      // student is looking at it.
-                      const UpcomingSection(),
                     ],
                   ),
                 ),
@@ -149,9 +178,23 @@ class HomeScreen extends StatelessWidget {
 
 /// Frosted greeting card with a soft gradient wash and avatar.
 /// Greeting text adapts to the time of day instead of always saying "morning".
-class _GreetingHero extends StatelessWidget {
+class _GreetingHero extends StatefulWidget {
   final VoidCallback onBell;
   const _GreetingHero({required this.onBell});
+
+  @override
+  State<_GreetingHero> createState() => _GreetingHeroState();
+}
+
+class _GreetingHeroState extends State<_GreetingHero> {
+  late final NotificationController _notifications =
+      getIt<NotificationController>();
+
+  @override
+  void initState() {
+    super.initState();
+    _notifications.refresh();
+  }
 
   static String _greeting(DateTime now) {
     final h = now.hour;
@@ -170,21 +213,13 @@ class _GreetingHero extends StatelessWidget {
         final isLoggedIn = session.isSignedIn;
         final profile = session.profile;
         final name = isLoggedIn
-            ? (profile?.fullName.isNotEmpty == true ? profile!.fullName : 'Student')
+            ? (profile?.fullName.isNotEmpty == true
+                  ? profile!.fullName
+                  : 'Student')
             : 'Guest';
         final initials = isLoggedIn ? (profile?.initials ?? '?') : null;
         return GlassCard(
-          gradient: context.isLight
-              ? const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFFE8F0FE), Color(0xFFFFFFFF)],
-                )
-              : const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0x332E7DF6), Color(0x110E1524)],
-                ),
+          gradient: context.colors.heroGradient,
           padding: const EdgeInsets.all(AppSpacing.lg),
           child: Row(
             children: [
@@ -199,8 +234,11 @@ class _GreetingHero extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                         ),
                       )
-                    : Icon(Icons.person_rounded,
-                        color: context.colors.primary, size: 24),
+                    : Icon(
+                        Icons.person_rounded,
+                        color: context.colors.primary,
+                        size: 24,
+                      ),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -228,7 +266,13 @@ class _GreetingHero extends StatelessWidget {
               ),
               const ThemeToggleIcon(),
               const SizedBox(width: 10),
-              _NotifBell(onTap: onBell, showBadge: isLoggedIn),
+              ListenableBuilder(
+                listenable: _notifications,
+                builder: (context, _) => _NotifBell(
+                  onTap: widget.onBell,
+                  unreadCount: isLoggedIn ? _notifications.unreadCount : 0,
+                ),
+              ),
             ],
           ),
         );
@@ -239,8 +283,8 @@ class _GreetingHero extends StatelessWidget {
 
 class _NotifBell extends StatelessWidget {
   final VoidCallback onTap;
-  final bool showBadge;
-  const _NotifBell({required this.onTap, this.showBadge = true});
+  final int unreadCount;
+  const _NotifBell({required this.onTap, this.unreadCount = 0});
   @override
   Widget build(BuildContext context) {
     return Semantics(
@@ -265,16 +309,28 @@ class _NotifBell extends StatelessWidget {
                   Icons.notifications_none_rounded,
                   color: context.colors.textPrimary,
                 ),
-                if (showBadge)
+                if (unreadCount > 0)
                   Positioned(
-                    top: 11,
-                    right: 12,
+                    top: 4,
+                    right: 4,
                     child: Container(
-                      width: 8,
-                      height: 8,
+                      constraints: const BoxConstraints(minWidth: 18),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: context.colors.danger,
-                        shape: BoxShape.circle,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: Text(
+                        unreadCount > 99 ? '99+' : '$unreadCount',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                     ),
                   ),
@@ -366,7 +422,11 @@ class _LegalHelpCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 4),
-                        Icon(Icons.arrow_forward_rounded, color: danger, size: 16),
+                        Icon(
+                          Icons.arrow_forward_rounded,
+                          color: danger,
+                          size: 16,
+                        ),
                       ],
                     ),
                   ],
@@ -402,6 +462,8 @@ class _UrgentBloodCardState extends State<_UrgentBloodCard> {
   @override
   void initState() {
     super.initState();
+    _request = homeUrgentRequest.value;
+    homeUrgentRequest.addListener(_requestChanged);
     _load();
     // Re-fetch periodically so the card advances when the active request's 6h
     // window ends (the view drops it) and picks up newly-posted urgent requests.
@@ -410,14 +472,19 @@ class _UrgentBloodCardState extends State<_UrgentBloodCard> {
 
   @override
   void dispose() {
+    homeUrgentRequest.removeListener(_requestChanged);
     _timer?.cancel();
     super.dispose();
+  }
+
+  void _requestChanged() {
+    if (mounted) setState(() => _request = homeUrgentRequest.value);
   }
 
   Future<void> _load() async {
     try {
       final request = await getIt<BloodRepository>().fetchActiveUrgentRequest();
-      if (mounted) setState(() => _request = request);
+      homeUrgentRequest.value = request;
     } catch (_) {
       // Best-effort: a failed poll leaves the last-known state untouched.
     }
@@ -426,16 +493,98 @@ class _UrgentBloodCardState extends State<_UrgentBloodCard> {
   @override
   Widget build(BuildContext context) {
     final request = _request;
-    if (request == null) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(top: 12),
-      child: Entrance(
-        index: 2,
-        child: _UrgentBloodCardBody(
-          request: request,
-          onTap: () => context.push(AppRoutes.blood),
-        ),
+    // Having nothing urgent to answer is the normal case, so an "all clear" row
+    // would spend one of the home screen's best slots saying so every day. The
+    // slot takes no space at all until there is a request. Blood Help stays
+    // reachable from Quick Access and the hub.
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 220),
+      layoutBuilder: (currentChild, previousChildren) => Stack(
+        alignment: Alignment.topCenter,
+        children: [
+          ...previousChildren,
+          if (currentChild != null) currentChild,
+        ],
       ),
+      child: request == null
+          ? const SizedBox.shrink(key: ValueKey('no-urgent-blood'))
+          : Padding(
+              key: ValueKey('urgent-blood-${request.id}'),
+              padding: const EdgeInsets.only(top: 12),
+              child: Entrance(
+                index: 2,
+                child: _UrgentBloodCardBody(
+                  request: request,
+                  onTap: () => context.push(AppRoutes.blood),
+                ),
+              ),
+            ),
+    );
+  }
+}
+
+class _HomeSyncState extends StatelessWidget {
+  const _HomeSyncState();
+
+  @override
+  Widget build(BuildContext context) {
+    final schedule = getIt<BusScheduleController>();
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        homeLastSyncedAt,
+        homeRefreshSnapshot,
+        schedule,
+      ]),
+      builder: (context, _) {
+        final completeSync = homeLastSyncedAt.value;
+        final timetableSync = schedule.lastSyncedAt;
+        final health = homeRefreshSnapshot.value.health;
+        final label = schedule.source == BusScheduleSource.bundled
+            ? schedule.error == null
+                  ? 'Saved timetable'
+                  : 'Saved timetable · live update unavailable'
+            : schedule.source == BusScheduleSource.cachedOffline
+            ? timetableSync == null
+                  ? 'Offline · showing last known data'
+                  : 'Offline · last synced ${formatFreshnessTime(timetableSync)}'
+            : health == HomeRefreshHealth.partial
+            ? timetableSync == null
+                  ? 'Some live data unavailable'
+                  : 'Partly synced · ${formatFreshnessTime(timetableSync)}'
+            : completeSync == null
+            ? 'Live data not synced yet'
+            : 'Last synced ${formatFreshnessTime(completeSync)}';
+        final warning =
+            schedule.error != null ||
+            schedule.source == BusScheduleSource.cachedOffline ||
+            health == HomeRefreshHealth.partial ||
+            health == HomeRefreshHealth.failure;
+        return Semantics(
+          label: label,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Icon(
+                Icons.sync_rounded,
+                size: 13,
+                color: warning
+                    ? context.colors.warning
+                    : context.colors.textMuted,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  color: warning
+                      ? context.colors.warning
+                      : context.colors.textMuted,
+                  fontSize: 10.5,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -481,8 +630,11 @@ class _UrgentBloodCardBody extends StatelessWidget {
                   color: Colors.white.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(AppRadii.md),
                 ),
-                child: const Icon(Icons.water_drop_rounded,
-                    color: Colors.white, size: 30),
+                child: const Icon(
+                  Icons.water_drop_rounded,
+                  color: Colors.white,
+                  size: 30,
+                ),
               ),
               const SizedBox(width: AppSpacing.lg),
               Expanded(
@@ -533,8 +685,11 @@ class _UrgentBloodCardBody extends StatelessWidget {
                           ),
                         ),
                         SizedBox(width: 4),
-                        Icon(Icons.arrow_forward_rounded,
-                            color: Colors.white, size: 16),
+                        Icon(
+                          Icons.arrow_forward_rounded,
+                          color: Colors.white,
+                          size: 16,
+                        ),
                       ],
                     ),
                   ],
@@ -570,8 +725,10 @@ class _QuickAccessHeader extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
                 onTap: onCustomize,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: context.colors.border),
@@ -666,7 +823,10 @@ class _NoCardsCard extends StatelessWidget {
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right_rounded, color: context.colors.textMuted),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: context.colors.textMuted,
+              ),
             ],
           ),
         ),
@@ -727,10 +887,7 @@ class _ActionCard extends StatelessWidget {
                 card.subtitle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: context.colors.textMuted,
-                  fontSize: 11,
-                ),
+                style: TextStyle(color: context.colors.textMuted, fontSize: 11),
               ),
             ],
           ),
@@ -745,12 +902,11 @@ class _SectionTitle extends StatelessWidget {
   const _SectionTitle(this.text);
   @override
   Widget build(BuildContext context) => Text(
-        text,
-        style: TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w700,
-          color: context.colors.textPrimary,
-        ),
-      );
+    text,
+    style: TextStyle(
+      fontSize: 16,
+      fontWeight: FontWeight.w700,
+      color: context.colors.textPrimary,
+    ),
+  );
 }
-

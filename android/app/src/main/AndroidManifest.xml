@@ -21,6 +21,11 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round">
+        <!-- This XML reference keeps the notification icon in every APK and
+             gives flutter_local_notifications a safe default. -->
+        <meta-data
+            android:name="com.dexterous.flutterlocalnotifications.default_notification_icon"
+            android:resource="@drawable/ic_stat_bus_alarm" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

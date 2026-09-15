@@ -346,11 +346,6 @@ class _LoggedInView extends StatelessWidget {
             onTap: () => context.push(AppRoutes.accountApprovals),
           ),
         _Tile(
-          icon: Icons.edit_outlined,
-          label: 'Edit Profile',
-          onTap: () => showToast(context, 'Edit profile'),
-        ),
-        _Tile(
           icon: Icons.dashboard_customize_outlined,
           label: 'Customize Home Cards',
           onTap: () => showHomeCardsCustomizer(context),
@@ -365,11 +360,6 @@ class _LoggedInView extends StatelessWidget {
           icon: Icons.fact_check_outlined,
           label: 'Attendance History',
           onTap: () => context.push(AppRoutes.attendance),
-        ),
-        _Tile(
-          icon: Icons.settings_outlined,
-          label: 'Settings',
-          onTap: () => showToast(context, 'Settings'),
         ),
         _Tile(
           icon: Icons.info_outline_rounded,

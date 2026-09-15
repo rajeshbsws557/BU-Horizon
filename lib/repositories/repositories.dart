@@ -9,5 +9,6 @@ export 'exam_repository.dart';
 export 'legal_help_repository.dart';
 export 'lost_found_repository.dart';
 export 'notice_repository.dart';
+export 'notification_repository.dart';
 export 'people_repository.dart';
 export 'resource_repository.dart';

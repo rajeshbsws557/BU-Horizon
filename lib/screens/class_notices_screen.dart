@@ -36,6 +36,8 @@ class _ClassNoticesScreenState extends State<ClassNoticesScreen> {
   bool _loading = true;
   bool _mutating = false;
   List<CourseOffering> _courses = const [];
+  String? _error;
+  DateTime? _lastUpdatedAt;
 
   /// This screen owns term selection so the semester-history button can live in
   /// the AppBar (top-right, just left of the "+" for CRs), per product spec.
@@ -72,7 +74,14 @@ class _ClassNoticesScreenState extends State<ClassNoticesScreen> {
   }
 
   Future<void> _loadCourses() async {
-    if (mounted) setState(() => _loading = true);
+    // Keep an already-loaded catalog on screen while refreshing; only the very
+    // first read shows skeletons.
+    if (mounted) {
+      setState(() {
+        _loading = _courses.isEmpty;
+        _error = null;
+      });
+    }
     try {
       final courses = await _coursesRepository.fetchCourses();
       if (!mounted) return;
@@ -97,11 +106,14 @@ class _ClassNoticesScreenState extends State<ClassNoticesScreen> {
                   : (availableTerms.isNotEmpty ? availableTerms.last : null);
         }
         _loading = false;
+        _lastUpdatedAt = DateTime.now();
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loading = false);
-      showToast(context, 'Could not load your batch courses');
+      setState(() {
+        _loading = false;
+        _error = 'Could not load your batch courses.';
+      });
     }
   }
 
@@ -230,6 +242,8 @@ class _ClassNoticesScreenState extends State<ClassNoticesScreen> {
             onOpen: _openCourse,
             onEdit: canManage ? _editCourse : null,
             onDelete: canManage ? _deleteCourse : null,
+            errorMessage: _error,
+            lastUpdatedAt: _lastUpdatedAt,
             // Controlled term selection: the screen owns the term (defaulted to
             // the student's current term in _loadCourses) and renders the
             // history button in the AppBar, so the current semester's notices
@@ -264,12 +278,22 @@ class _CourseHubScreenState extends State<_CourseHubScreen>
 
   bool _loading = true;
   bool _mutating = false;
+  String? _error;
+  DateTime? _lastUpdatedAt;
 
   // Data sources
   AttendanceCourseSummary? _attendance;
   List<ClassNotice> _notices = const [];
   List<ResourceItem> _resources = const [];
   List<ExamItem> _exams = const [];
+
+  /// True when nothing has ever loaded for this course, so a failed read has no
+  /// stale content to fall back to.
+  bool get _isEmpty =>
+      _attendance == null &&
+      _notices.isEmpty &&
+      _resources.isEmpty &&
+      _exams.isEmpty;
 
   bool get _canManage =>
       getIt<SessionController>().profile?.role.toLowerCase() == 'cr';
@@ -291,7 +315,12 @@ class _CourseHubScreenState extends State<_CourseHubScreen>
   }
 
   Future<void> _loadAll() async {
-    if (mounted) setState(() => _loading = true);
+    if (mounted) {
+      setState(() {
+        _loading = _isEmpty;
+        _error = null;
+      });
+    }
     try {
       final results = await Future.wait([
         _attendanceRepo.fetchCourseSummary(widget.course.id),
@@ -306,11 +335,14 @@ class _CourseHubScreenState extends State<_CourseHubScreen>
         _resources = results[2] as List<ResourceItem>;
         _exams = results[3] as List<ExamItem>;
         _loading = false;
+        _lastUpdatedAt = DateTime.now();
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loading = false);
-      showToast(context, 'Could not load course data');
+      setState(() {
+        _loading = false;
+        _error = 'Could not load this course’s notices, resources and exams.';
+      });
     }
   }
 
@@ -572,12 +604,55 @@ class _CourseHubScreenState extends State<_CourseHubScreen>
           floatingActionButton: _buildFab(canManage),
           body: _loading
               ? const _HubSkeletonView()
+              : _error != null && _isEmpty
+              ? RefreshIndicator(
+                  color: context.colors.primary,
+                  backgroundColor: context.colors.surfaceAlt,
+                  onRefresh: _loadAll,
+                  child: RetryStateList(
+                    title: 'Course hub unavailable',
+                    message: _error!,
+                    onRetry: _loadAll,
+                  ),
+                )
               : RefreshIndicator(
                   color: context.colors.primary,
                   backgroundColor: context.colors.surfaceAlt,
                   onRefresh: _loadAll,
                   child: NestedScrollView(
                     headerSliverBuilder: (context, innerBoxIsScrolled) => [
+                      // Freshness + failed-refresh state for the whole hub.
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                            AppSpacing.lg,
+                            AppSpacing.md,
+                            AppSpacing.lg,
+                            0,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (_error != null) ...[
+                                DataStateBanner(
+                                  message:
+                                      'Could not refresh this course. Showing the last loaded data.',
+                                  tone: DataStateTone.warning,
+                                  onRetry: _loadAll,
+                                ),
+                                const SizedBox(height: AppSpacing.sm),
+                              ],
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: LastUpdatedLabel(
+                                  updatedAt: _lastUpdatedAt,
+                                  emptyLabel: 'Course not synced yet',
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                       // Attendance summary card
                       SliverToBoxAdapter(
                         child: _AttendanceSummaryCard(

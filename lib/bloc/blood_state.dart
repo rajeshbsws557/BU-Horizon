@@ -4,11 +4,15 @@ class BloodState extends Equatable {
   final int tab;
   final bool isLoading;
   final List<BloodRequest> requests;
+  final String? error;
+  final DateTime? lastUpdatedAt;
 
   const BloodState({
     this.tab = 0,
     this.isLoading = false,
     this.requests = const [],
+    this.error,
+    this.lastUpdatedAt,
   });
 
   /// The most recent urgent open request, shown as the hero card.
@@ -19,13 +23,21 @@ class BloodState extends Equatable {
     return null;
   }
 
-  BloodState copyWith({int? tab, bool? isLoading, List<BloodRequest>? requests}) =>
-      BloodState(
-        tab: tab ?? this.tab,
-        isLoading: isLoading ?? this.isLoading,
-        requests: requests ?? this.requests,
-      );
+  BloodState copyWith({
+    int? tab,
+    bool? isLoading,
+    List<BloodRequest>? requests,
+    String? error,
+    bool clearError = false,
+    DateTime? lastUpdatedAt,
+  }) => BloodState(
+    tab: tab ?? this.tab,
+    isLoading: isLoading ?? this.isLoading,
+    requests: requests ?? this.requests,
+    error: clearError ? null : (error ?? this.error),
+    lastUpdatedAt: lastUpdatedAt ?? this.lastUpdatedAt,
+  );
 
   @override
-  List<Object?> get props => [tab, isLoading, requests];
+  List<Object?> get props => [tab, isLoading, requests, error, lastUpdatedAt];
 }

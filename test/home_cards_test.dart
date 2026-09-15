@@ -139,6 +139,10 @@ void main() {
       (WidgetTester tester) async {
     await pumpApp(tester);
 
+    // Quick Access sits below the Upcoming block, so on a phone-sized viewport
+    // the Customize control starts below the fold.
+    await tester.ensureVisible(find.text('Customize'));
+    await settle(tester);
     await tester.tap(find.text('Customize'));
     await settle(tester);
 
@@ -168,6 +172,8 @@ void main() {
       (WidgetTester tester) async {
     await pumpApp(tester);
 
+    await tester.ensureVisible(find.text('Customize'));
+    await settle(tester);
     await tester.tap(find.text('Customize'));
     await settle(tester);
 

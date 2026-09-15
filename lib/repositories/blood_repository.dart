@@ -3,6 +3,20 @@ import 'package:injectable/injectable.dart';
 import '../data/sample_data.dart';
 import '../models/models.dart';
 
+class BloodDonorRegistration {
+  final BloodGroup group;
+  final String contact;
+  final DateTime? lastDonated;
+  final bool available;
+
+  const BloodDonorRegistration({
+    required this.group,
+    required this.contact,
+    required this.lastDonated,
+    required this.available,
+  });
+}
+
 /// Repository for blood requests and in-app responses.
 abstract interface class BloodRepository {
   Future<List<BloodRequest>> fetchRequests();
@@ -30,10 +44,15 @@ abstract interface class BloodRepository {
 
   /// Mark a blood request as fulfilled (requester only).
   Future<void> markFulfilled(String requestId);
+
+  Future<BloodDonorRegistration?> fetchMyDonorRegistration();
+
+  Future<void> saveDonorRegistration(BloodDonorRegistration registration);
 }
 
 @Injectable(as: BloodRepository)
 final class SampleBloodRepository implements BloodRepository {
+  BloodDonorRegistration? _registration;
   @override
   Future<List<BloodRequest>> fetchRequests() async =>
       List.unmodifiable(SampleData.bloodRequests);
@@ -64,5 +83,16 @@ final class SampleBloodRepository implements BloodRepository {
   @override
   Future<void> markFulfilled(String requestId) async {
     throw StateError('Backend not configured');
+  }
+
+  @override
+  Future<BloodDonorRegistration?> fetchMyDonorRegistration() async =>
+      _registration;
+
+  @override
+  Future<void> saveDonorRegistration(
+    BloodDonorRegistration registration,
+  ) async {
+    _registration = registration;
   }
 }

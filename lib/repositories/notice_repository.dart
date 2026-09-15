@@ -51,7 +51,8 @@ final class SampleNoticeRepository implements NoticeRepository {
   int _nextId = 10;
 
   @override
-  Future<List<ClassNotice>> fetchNotices() async => const [];
+  Future<List<ClassNotice>> fetchNotices() async =>
+      List.unmodifiable(SampleData.notices);
 
   @override
   Future<List<ClassNotice>> fetchCourseNotices(String offeringId) async =>

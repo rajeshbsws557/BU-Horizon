@@ -1,5 +1,8 @@
 // Developed by Rajesh Biswas (rajeshbiswas.dev)
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../config/app_links.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/horizon_logo.dart';
@@ -7,14 +10,52 @@ import '../widgets/horizon_logo.dart';
 class AboutScreen extends StatelessWidget {
   const AboutScreen({super.key});
 
+  /// Only links with a real destination are listed. A policy that has not been
+  /// published yet simply has no row, instead of a tappable "coming soon" one.
+  static List<_AboutLink> _linksFor() {
+    const email = AppLinks.contactEmail;
+    return <_AboutLink>[
+      const _AboutLink(
+        icon: Icons.privacy_tip_outlined,
+        label: 'Privacy Policy',
+        url: AppLinks.privacyPolicyUrl,
+      ),
+      const _AboutLink(
+        icon: Icons.description_outlined,
+        label: 'Terms of Service',
+        url: AppLinks.termsOfServiceUrl,
+      ),
+      _AboutLink(
+        icon: Icons.mail_outline_rounded,
+        label: 'Contact Us',
+        url: email == null ? null : 'mailto:$email',
+      ),
+      const _AboutLink(
+        icon: Icons.code_rounded,
+        label: 'About Developer',
+        url: AppLinks.developerUrl,
+      ),
+    ].where((link) => link.url != null).toList();
+  }
+
+  Future<void> _open(BuildContext context, _AboutLink link) async {
+    final uri = Uri.tryParse(link.url!);
+    var opened = false;
+    if (uri != null) {
+      try {
+        opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } catch (_) {
+        opened = false;
+      }
+    }
+    if (!opened && context.mounted) {
+      showToast(context, 'Could not open ${link.label}');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final links = <List<dynamic>>[
-      [Icons.privacy_tip_outlined, 'Privacy Policy'],
-      [Icons.description_outlined, 'Terms of Service'],
-      [Icons.mail_outline_rounded, 'Contact Us'],
-      [Icons.code_rounded, 'About Developer'],
-    ];
+    final links = _linksFor();
     return Scaffold(
       appBar: AppBar(title: const Text('BU Horizon')),
       body: ResponsivePage(
@@ -62,12 +103,12 @@ class AboutScreen extends StatelessWidget {
             ),
             const SizedBox(height: 28),
             ...links.map(
-              (l) => Padding(
+              (link) => Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: _LinkTile(
-                  icon: l[0] as IconData,
-                  label: l[1] as String,
-                  onTap: () => showToast(context, '${l[1]} coming soon'),
+                  icon: link.icon,
+                  label: link.label,
+                  onTap: () => _open(context, link),
                 ),
               ),
             ),
@@ -99,6 +140,16 @@ class AboutScreen extends StatelessWidget {
   }
 }
 
+/// One About row. [url] is null while the destination is unpublished, which
+/// keeps the row out of the list entirely.
+class _AboutLink {
+  final IconData icon;
+  final String label;
+  final String? url;
+
+  const _AboutLink({required this.icon, required this.label, this.url});
+}
+
 class _LinkTile extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -114,6 +165,8 @@ class _LinkTile extends StatelessWidget {
     return Semantics(
       button: true,
       label: label,
+      hint: 'Opens outside the app',
+      excludeSemantics: true,
       child: Material(
         color: context.colors.surfaceAlt,
         borderRadius: BorderRadius.circular(14),
@@ -121,6 +174,7 @@ class _LinkTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           onTap: onTap,
           child: Container(
+            constraints: const BoxConstraints(minHeight: 52),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(14),
@@ -140,7 +194,8 @@ class _LinkTile extends StatelessWidget {
                   ),
                 ),
                 Icon(
-                  Icons.chevron_right_rounded,
+                  Icons.open_in_new_rounded,
+                  size: 18,
                   color: context.colors.textMuted,
                 ),
               ],

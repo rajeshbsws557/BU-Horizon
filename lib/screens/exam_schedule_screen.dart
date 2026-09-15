@@ -25,6 +25,8 @@ class _ExamScheduleScreenState extends State<ExamScheduleScreen> {
   bool _loading = true;
   List<ExamItem> _exams = const [];
   int? _selectedTerm;
+  String? _error;
+  DateTime? _lastUpdatedAt;
 
   bool get _canManage =>
       getIt<SessionController>().profile?.role.toLowerCase() == 'cr';
@@ -36,18 +38,24 @@ class _ExamScheduleScreenState extends State<ExamScheduleScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = _exams.isEmpty;
+      _error = null;
+    });
     try {
       final exams = await getIt<ExamRepository>().fetchExams();
       if (!mounted) return;
       setState(() {
         _exams = exams;
         _loading = false;
+        _lastUpdatedAt = DateTime.now();
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loading = false);
-      showToast(context, 'Could not load the exam schedule');
+      setState(() {
+        _loading = false;
+        _error = 'Could not load the exam schedule.';
+      });
     }
   }
 
@@ -167,12 +175,35 @@ class _ExamScheduleScreenState extends State<ExamScheduleScreen> {
         semanticsLabel: 'Refresh exam schedule',
         child: _loading
             ? const _ExamSkeletonList()
+            : _error != null && _exams.isEmpty
+            ? RetryStateList(
+                title: 'Exam schedule unavailable',
+                message: _error!,
+                onRetry: _load,
+              )
             : filteredExams.isEmpty && _exams.isNotEmpty
                 ? ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    children: const [
-                      SizedBox(height: 120),
-                      EmptyState(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      if (_error != null) ...[
+                        DataStateBanner(
+                          message:
+                              'Could not refresh exams. Showing the last loaded schedule.',
+                          tone: DataStateTone.warning,
+                          onRetry: _load,
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: LastUpdatedLabel(
+                          updatedAt: _lastUpdatedAt,
+                          emptyLabel: 'Exam schedule not synced yet',
+                        ),
+                      ),
+                      const SizedBox(height: 92),
+                      const EmptyState(
                         icon: Icons.edit_calendar_outlined,
                         title: 'No exams this term',
                         message: 'Your CR has not published any exam notices for this term yet.',
@@ -182,9 +213,17 @@ class _ExamScheduleScreenState extends State<ExamScheduleScreen> {
                 : filteredExams.isEmpty
                 ? ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    children: const [
-                      SizedBox(height: 120),
-                      EmptyState(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: LastUpdatedLabel(
+                          updatedAt: _lastUpdatedAt,
+                          emptyLabel: 'Exam schedule not synced yet',
+                        ),
+                      ),
+                      const SizedBox(height: 92),
+                      const EmptyState(
                         icon: Icons.edit_calendar_outlined,
                         title: 'No exams scheduled',
                         message:
@@ -205,10 +244,27 @@ class _ExamScheduleScreenState extends State<ExamScheduleScreen> {
                         // banner only while browsing a past term.
                         final onPast = selectedTerm != null &&
                             selectedTerm != currentTerm;
-                        return onPast
-                          ? Padding(
-                              padding: const EdgeInsets.only(bottom: 16),
-                              child: _ExamViewingTermBanner(
+                        return Column(
+                          children: [
+                            if (_error != null) ...[
+                              DataStateBanner(
+                                message:
+                                    'Could not refresh exams. Showing the last loaded schedule.',
+                                tone: DataStateTone.warning,
+                                onRetry: _load,
+                              ),
+                              const SizedBox(height: 10),
+                            ],
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: LastUpdatedLabel(
+                                updatedAt: _lastUpdatedAt,
+                                emptyLabel: 'Exam schedule not synced yet',
+                              ),
+                            ),
+                            if (onPast) ...[
+                              const SizedBox(height: 16),
+                              _ExamViewingTermBanner(
                                 termLabel: termLabel,
                                 term: selectedTerm,
                                 onReturnToCurrent: currentTerm == null
@@ -217,8 +273,9 @@ class _ExamScheduleScreenState extends State<ExamScheduleScreen> {
                                           () => _selectedTerm = currentTerm,
                                         ),
                               ),
-                            )
-                          : const SizedBox.shrink();
+                            ],
+                          ],
+                        );
                       }
 
                       final i = index - 1;

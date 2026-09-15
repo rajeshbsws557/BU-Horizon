@@ -38,6 +38,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
+import '../data/university_bus_schedule_data.dart';
+import 'next_departure_resolver.dart';
+
 /// Small icon for every notification this app posts.
 ///
 /// Must be a white-on-transparent silhouette: Android masks small icons by
@@ -159,6 +162,11 @@ class ScheduledBusAlarmInfo {
   final int leadMinutes;
   final String scheduledRingTimeIso;
 
+  /// Which days the trip runs, so a re-arm after a restart lands on a day the
+  /// bus actually leaves. Defaults to [ServiceDays.daily], which is what alarms
+  /// persisted before this field existed deserialise to.
+  final ServiceDays serviceDays;
+
   /// The OS notification id this alarm was scheduled under. Persisted so
   /// cancelling after a restart always targets the right pending alarm.
   final int? notificationId;
@@ -171,6 +179,7 @@ class ScheduledBusAlarmInfo {
     required this.busName,
     required this.leadMinutes,
     required this.scheduledRingTimeIso,
+    this.serviceDays = ServiceDays.daily,
     this.notificationId,
   });
 
@@ -187,6 +196,7 @@ class ScheduledBusAlarmInfo {
         'busName': busName,
         'leadMinutes': leadMinutes,
         'scheduledRingTimeIso': scheduledRingTimeIso,
+        'serviceDays': serviceDays.storageKey,
         'notificationId': notificationId,
       };
 
@@ -199,6 +209,7 @@ class ScheduledBusAlarmInfo {
         busName: json['busName'] as String,
         leadMinutes: json['leadMinutes'] as int,
         scheduledRingTimeIso: json['scheduledRingTimeIso'] as String,
+        serviceDays: serviceDaysFromKey(json['serviceDays'] as String?),
         notificationId: json['notificationId'] as int?,
       );
 }
@@ -638,7 +649,15 @@ class BusAlarmService {
   }
 
   /// Parses strings like "8:30 AM", "12:10 PM", "6:45 PM" into a DateTime object.
-  DateTime parseTripTimeToDateTime(String timeStr) {
+  ///
+  /// [days] restricts which weekdays the trip actually runs. A Fri & Sat-only
+  /// 9:00 AM bus must not be armed for tomorrow when tomorrow is a Wednesday, so
+  /// the next occurrence comes from the shared [nextServiceOccurrence] rather
+  /// than a blanket "+1 day".
+  DateTime parseTripTimeToDateTime(
+    String timeStr, {
+    ServiceDays days = ServiceDays.daily,
+  }) {
     final clean = timeStr.trim().toUpperCase();
     final parts = clean.split(RegExp(r'\s+'));
     if (parts.isEmpty) return DateTime.now();
@@ -659,20 +678,13 @@ class BusAlarmService {
     }
 
     final now = DateTime.now();
-    DateTime departureDateTime = DateTime(
-      now.year,
-      now.month,
-      now.day,
-      hour,
-      minute,
-    );
-
-    // If the bus departure time has already passed today, schedule for tomorrow
-    if (departureDateTime.isBefore(now)) {
-      departureDateTime = departureDateTime.add(const Duration(days: 1));
-    }
-
-    return departureDateTime;
+    return nextServiceOccurrence(
+          days,
+          minutesOfDay: hour * 60 + minute,
+          now: now,
+          grace: Duration.zero,
+        ) ??
+        DateTime(now.year, now.month, now.day, hour, minute);
   }
 
   /// Schedules an exact OS alarm for a bus trip with user's selected lead time.
@@ -686,6 +698,7 @@ class BusAlarmService {
     required String tripTime,
     required String busName,
     required int leadMinutes,
+    ServiceDays serviceDays = ServiceDays.daily,
   }) async {
     if (kIsWeb) {
       throw const BusAlarmException(
@@ -706,18 +719,32 @@ class BusAlarmService {
     // registered now; the UI separately surfaces any switch worth turning on.
     final permissions = await ensurePermissions();
 
-    final departureTime = parseTripTimeToDateTime(tripTime);
+    final departureTime = parseTripTimeToDateTime(
+      tripTime,
+      days: serviceDays,
+    );
 
     final ringTime = departureTime.subtract(Duration(minutes: leadMinutes));
     final now = DateTime.now();
 
-    // If the calculated ring time is in the past (e.g. 5 min lead for a bus leaving in 2 min today),
-    // adjust to tomorrow's trip
+    // If the calculated ring time is in the past (e.g. 5 min lead for a bus
+    // leaving in 2 min today), roll to the trip's *next running day* — not
+    // blindly tomorrow, which would arm a Fri & Sat-only bus on a Wednesday.
     DateTime finalRingTime = ringTime;
     DateTime finalDepartureTime = departureTime;
 
     if (finalRingTime.isBefore(now)) {
-      finalDepartureTime = departureTime.add(const Duration(days: 1));
+      final minutesOfDay = departureTime.hour * 60 + departureTime.minute;
+      finalDepartureTime =
+          nextServiceOccurrence(
+            serviceDays,
+            minutesOfDay: minutesOfDay,
+            // Look strictly past the occurrence just picked, and far enough
+            // ahead that the lead time no longer lands in the past.
+            now: departureTime.add(Duration(minutes: leadMinutes + 1)),
+            grace: Duration.zero,
+          ) ??
+          departureTime.add(const Duration(days: 1));
       finalRingTime = finalDepartureTime.subtract(Duration(minutes: leadMinutes));
     }
 
@@ -818,6 +845,7 @@ class BusAlarmService {
       busName: busName,
       leadMinutes: leadMinutes,
       scheduledRingTimeIso: finalRingTime.toIso8601String(),
+      serviceDays: serviceDays,
       notificationId: notificationId,
     );
 

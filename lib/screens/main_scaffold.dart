@@ -166,7 +166,13 @@ class MainScaffold extends StatelessWidget {
               context: context,
               label: 'Bus Schedule',
               icon: Icons.directions_bus_rounded,
-              isSelected: false,
+              // Derived rather than hardcoded, so the highlight cannot drift
+              // from the location. Note this reads false while /bus is a
+              // top-level route: it renders *over* this bar instead of under
+              // it, so the bar is not on screen there. Moving /bus into the
+              // shell — the fix that would make Bus Schedule behave like the
+              // tabs beside it — makes this correct with no further change.
+              isSelected: _isCurrentRoute(context, AppRoutes.bus),
               onTap: () => context.push(AppRoutes.bus),
             ),
             _webNavButton(
@@ -259,6 +265,14 @@ class MainScaffold extends StatelessWidget {
       ),
     );
   }
+
+  /// Whether [route] is the location currently being displayed.
+  ///
+  /// The five shell branches are described by
+  /// [StatefulNavigationShell.currentIndex]; anything reached with `push` is
+  /// not, so its nav entry has to ask the router instead of assuming.
+  static bool _isCurrentRoute(BuildContext context, String route) =>
+      GoRouter.of(context).state.uri.path == route;
 
   static int _rawIndex(int shellIndex) {
     switch (shellIndex) {

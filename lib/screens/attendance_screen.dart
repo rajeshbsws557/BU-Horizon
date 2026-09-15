@@ -14,8 +14,6 @@ import '../widgets/motion.dart';
 import '../widgets/pending_approval_view.dart';
 import '../widgets/term_history_sheet.dart';
 
-
-
 /// Course-first attendance for the signed-in student's department and batch.
 ///
 /// A CR remains on this same student UI. Their role only adds course and
@@ -96,8 +94,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         // Only (re)initialize the selection when it is unset or no longer valid.
         // Never overwrite a term the student deliberately picked.
         if (_selectedTerm == null || !availableTerms.contains(_selectedTerm)) {
-          _selectedTerm = currentTerm != null &&
-                  availableTerms.contains(currentTerm)
+          _selectedTerm =
+              currentTerm != null && availableTerms.contains(currentTerm)
               ? currentTerm
               : (availableTerms.isNotEmpty ? availableTerms.last : null);
         }
@@ -106,7 +104,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         };
         _loading = false;
       });
-
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -211,7 +208,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       );
     }
 
-
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -223,7 +219,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         actions: [
           IconButton(
             tooltip: 'View history',
-            icon: Icon(Icons.history_rounded, color: context.colors.textPrimary),
+            icon: Icon(
+              Icons.history_rounded,
+              color: context.colors.textPrimary,
+            ),
             onPressed: () async {
               final picked = await showTermHistorySheet(
                 context,
@@ -241,7 +240,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       ),
 
       floatingActionButton: _isCr
-
           ? FloatingActionButton.extended(
               onPressed: _mutating ? null : () => _editCourse(),
               icon: const Icon(Icons.add_rounded),
@@ -319,9 +317,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                               onReturnToCurrent: profile?.currentTerm == null
                                   ? null
                                   : () => setState(
-                                        () => _selectedTerm =
-                                            profile!.currentTerm,
-                                      ),
+                                      () =>
+                                          _selectedTerm = profile!.currentTerm,
+                                    ),
                             ),
                             const SizedBox(height: 16),
                           ],
@@ -674,6 +672,7 @@ class _CourseAttendanceScreenState extends State<_CourseAttendanceScreen> {
   AttendanceCourseSummary? _summary;
   List<AttendanceSession> _sessions = const [];
   List<ScheduledClass> _schedules = const [];
+  String? _inlineCorrectionMessage;
 
   bool get _isCr => widget.session.profile?.role.toLowerCase() == 'cr';
 
@@ -815,14 +814,13 @@ class _CourseAttendanceScreenState extends State<_CourseAttendanceScreen> {
         showToast(context, 'No recorded classes to export yet');
         return;
       }
-      final savedPath = await const AttendanceExportService()
-          .exportToFile(data);
+      final savedPath = await const AttendanceExportService().exportToFile(
+        data,
+      );
       if (!mounted) return;
       showToast(
         context,
-        savedPath == null
-            ? 'Export cancelled'
-            : 'Attendance CSV saved',
+        savedPath == null ? 'Export cancelled' : 'Attendance CSV saved',
       );
     } catch (_) {
       if (mounted) showToast(context, 'Could not export attendance');
@@ -858,6 +856,90 @@ class _CourseAttendanceScreenState extends State<_CourseAttendanceScreen> {
       await _load();
     } catch (_) {
       if (mounted) showToast(context, 'Could not delete attendance');
+    }
+  }
+
+  Future<void> _requestCorrection(AttendanceSession session) async {
+    if (session.status == null || session.correctionStatus == 'pending') return;
+    final reason = TextEditingController();
+    var requested = session.status == AttendanceMark.present
+        ? AttendanceMark.absent
+        : AttendanceMark.present;
+    final submitted = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Request attendance correction'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                DateFormat('EEEE, MMM d, yyyy').format(session.date),
+                style: TextStyle(color: context.colors.textSecondary),
+              ),
+              const SizedBox(height: 14),
+              SegmentedButton<AttendanceMark>(
+                segments: const [
+                  ButtonSegment(
+                    value: AttendanceMark.present,
+                    icon: Icon(Icons.check_circle_outline_rounded),
+                    label: Text('Present'),
+                  ),
+                  ButtonSegment(
+                    value: AttendanceMark.absent,
+                    icon: Icon(Icons.cancel_outlined),
+                    label: Text('Absent'),
+                  ),
+                ],
+                selected: {requested},
+                onSelectionChanged: (value) =>
+                    setDialogState(() => requested = value.first),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: reason,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Reason',
+                  hintText: 'Explain why this record should change',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Submit'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (submitted != true || !mounted) return;
+    try {
+      await widget.repository.requestCorrection(
+        session: session,
+        requestedStatus: requested,
+        reason: reason.text.trim(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _inlineCorrectionMessage =
+            'Correction request submitted. Your CR can now review the requested '
+            '${_attendanceMarkLabel(requested).toLowerCase()} mark.';
+      });
+      await _load();
+    } catch (_) {
+      if (mounted) {
+        showToast(context, 'Could not submit the correction request');
+      }
+    } finally {
+      reason.dispose();
     }
   }
 
@@ -917,6 +999,12 @@ class _CourseAttendanceScreenState extends State<_CourseAttendanceScreen> {
                           course: widget.course,
                           summary: _summary!,
                         ),
+                        if (_inlineCorrectionMessage != null) ...[
+                          const SizedBox(height: 12),
+                          _InlineCorrectionConfirmation(
+                            message: _inlineCorrectionMessage!,
+                          ),
+                        ],
                         const SizedBox(height: 22),
                         Row(
                           children: [
@@ -1010,6 +1098,8 @@ class _CourseAttendanceScreenState extends State<_CourseAttendanceScreen> {
                                   onEdit: () => _openEditor(_sessions[index]),
                                   onDelete: () => _delete(_sessions[index]),
                                   onExport: () => _export(_sessions[index]),
+                                  onCorrection: () =>
+                                      _requestCorrection(_sessions[index]),
                                 ),
                               ),
                             ),
@@ -1111,6 +1201,7 @@ class _AttendanceSessionCard extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onExport;
+  final VoidCallback onCorrection;
 
   const _AttendanceSessionCard({
     required this.session,
@@ -1118,6 +1209,7 @@ class _AttendanceSessionCard extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onExport,
+    required this.onCorrection,
   });
 
   @override
@@ -1207,6 +1299,29 @@ class _AttendanceSessionCard extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (!isCr && session.correctionStatus != null) ...[
+                  const SizedBox(height: 8),
+                  _CorrectionStatus(
+                    status: session.correctionStatus!,
+                    requestedStatus: session.correctionRequestedStatus,
+                    requestedAt: session.correctionRequestedAt,
+                    reviewedAt: session.correctionReviewedAt,
+                  ),
+                ] else if (!isCr && session.status != null) ...[
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: onCorrection,
+                      icon: const Icon(Icons.edit_note_rounded, size: 17),
+                      label: const Text('Request correction'),
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(44, 44),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1259,6 +1374,129 @@ class _AttendanceSessionCard extends StatelessWidget {
     );
   }
 }
+
+class _CorrectionStatus extends StatelessWidget {
+  final String status;
+  final AttendanceMark? requestedStatus;
+  final DateTime? requestedAt;
+  final DateTime? reviewedAt;
+
+  const _CorrectionStatus({
+    required this.status,
+    this.requestedStatus,
+    this.requestedAt,
+    this.reviewedAt,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final approved = status == 'accepted' || status == 'approved';
+    final rejected = status == 'rejected';
+    final color = approved
+        ? context.colors.success
+        : rejected
+        ? context.colors.danger
+        : context.colors.warning;
+    final label = approved
+        ? 'Correction approved'
+        : rejected
+        ? 'Correction rejected'
+        : 'Correction pending review';
+    String format(DateTime? value) => value == null
+        ? 'Not available'
+        : DateFormat('MMM d, h:mm a').format(value);
+    final requestedLabel = requestedStatus == null
+        ? null
+        : _attendanceMarkLabel(requestedStatus!);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 3),
+          if (requestedLabel != null)
+            Text(
+              'Requested mark: $requestedLabel',
+              style: TextStyle(color: color, fontSize: 11.5),
+            ),
+          Text(
+            'Submitted ${format(requestedAt)}'
+            '${reviewedAt == null ? '' : ' · Reviewed ${format(reviewedAt)}'}',
+            style: TextStyle(color: color, fontSize: 11.5),
+          ),
+          if (approved || rejected)
+            Text(
+              approved
+                  ? 'Result: attendance record updated'
+                  : 'Result: attendance record unchanged',
+              style: TextStyle(color: color, fontSize: 11.5),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InlineCorrectionConfirmation extends StatelessWidget {
+  final String message;
+
+  const _InlineCorrectionConfirmation({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: context.colors.success.withValues(alpha: 0.11),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: context.colors.success.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.check_circle_outline_rounded,
+            color: context.colors.success,
+            size: 20,
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: context.colors.textPrimary,
+                fontSize: 12.5,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _attendanceMarkLabel(AttendanceMark mark) => switch (mark) {
+  AttendanceMark.present => 'Present',
+  AttendanceMark.absent => 'Absent',
+};
 
 /// One scheduled class. CR gets "Take attendance" once the class day arrives;
 /// everyone sees the recorded state afterward.
@@ -2069,11 +2307,12 @@ class _CourseEditorDialogState extends State<_CourseEditorDialog> {
   // New courses default to the CR's current registered term so they never
   // silently land in the 1st semester; editing keeps the course's own term.
   late final TextEditingController _term = TextEditingController(
-    text: (widget.course?.termNumber ??
-            (widget.course == null
-                ? getIt<SessionController>().profile?.currentTerm
-                : null))
-        ?.toString() ??
+    text:
+        (widget.course?.termNumber ??
+                (widget.course == null
+                    ? getIt<SessionController>().profile?.currentTerm
+                    : null))
+            ?.toString() ??
         '',
   );
 

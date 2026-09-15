@@ -29,6 +29,8 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
   bool _loading = true;
   bool _mutating = false;
   List<CourseOffering> _courses = const [];
+  String? _error;
+  DateTime? _lastUpdatedAt;
 
   bool get _canManage =>
       getIt<SessionController>().profile?.role.toLowerCase() == 'cr';
@@ -40,18 +42,28 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
   }
 
   Future<void> _loadCourses() async {
-    if (mounted) setState(() => _loading = true);
+    // A refresh keeps the loaded catalog visible; only the first read shows
+    // skeletons.
+    if (mounted) {
+      setState(() {
+        _loading = _courses.isEmpty;
+        _error = null;
+      });
+    }
     try {
       final courses = await _coursesRepository.fetchCourses();
       if (!mounted) return;
       setState(() {
         _courses = courses;
         _loading = false;
+        _lastUpdatedAt = DateTime.now();
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loading = false);
-      showToast(context, 'Could not load your batch courses');
+      setState(() {
+        _loading = false;
+        _error = 'Could not load your batch courses.';
+      });
     }
   }
 
@@ -168,6 +180,8 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
             onOpen: _openCourse,
             onEdit: canManage ? _editCourse : null,
             onDelete: canManage ? _deleteCourse : null,
+            errorMessage: _error,
+            lastUpdatedAt: _lastUpdatedAt,
           ),
         );
       },
@@ -189,6 +203,8 @@ class _CourseResourcesScreenState extends State<_CourseResourcesScreen> {
   bool _loading = true;
   bool _mutating = false;
   List<ResourceItem> _resources = const [];
+  String? _error;
+  DateTime? _lastUpdatedAt;
 
   bool get _canManage =>
       getIt<SessionController>().profile?.role.toLowerCase() == 'cr';
@@ -200,7 +216,12 @@ class _CourseResourcesScreenState extends State<_CourseResourcesScreen> {
   }
 
   Future<void> _load() async {
-    if (mounted) setState(() => _loading = true);
+    if (mounted) {
+      setState(() {
+        _loading = _resources.isEmpty;
+        _error = null;
+      });
+    }
     try {
       final resources = await _repository.fetchResources(
         offeringId: widget.course.id,
@@ -209,11 +230,14 @@ class _CourseResourcesScreenState extends State<_CourseResourcesScreen> {
       setState(() {
         _resources = resources;
         _loading = false;
+        _lastUpdatedAt = DateTime.now();
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loading = false);
-      showToast(context, 'Could not load course resources');
+      setState(() {
+        _loading = false;
+        _error = 'Could not load resources for this course.';
+      });
     }
   }
 
@@ -319,6 +343,33 @@ class _CourseResourcesScreenState extends State<_CourseResourcesScreen> {
     }
   }
 
+  /// Failed-refresh banner + freshness stamp, shared by the empty and populated
+  /// resource lists so both report state identically.
+  Widget _freshnessHeader() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_error != null) ...[
+          DataStateBanner(
+            message:
+                'Could not refresh resources. Showing the last loaded list.',
+            tone: DataStateTone.warning,
+            onRetry: _load,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
+        Align(
+          alignment: Alignment.centerRight,
+          child: LastUpdatedLabel(
+            updatedAt: _lastUpdatedAt,
+            emptyLabel: 'Resources not synced yet',
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -365,13 +416,25 @@ class _CourseResourcesScreenState extends State<_CourseResourcesScreen> {
             onRefresh: _load,
             child: _loading
                 ? const _ResourceSkeletonList()
+                : _error != null && _resources.isEmpty
+                ? RetryStateList(
+                    title: 'Resources unavailable',
+                    message: _error!,
+                    onRetry: _load,
+                  )
                 : _resources.isEmpty
                 ? ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     children: [
                       _CourseHeader(course: widget.course),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.lg,
+                        ),
+                        child: _freshnessHeader(),
+                      ),
                       SizedBox(
-                        height: MediaQuery.sizeOf(context).height * 0.48,
+                        height: MediaQuery.sizeOf(context).height * 0.42,
                         child: EmptyState(
                           icon: Icons.folder_open_outlined,
                           title: 'No resources yet',
@@ -395,7 +458,13 @@ class _CourseResourcesScreenState extends State<_CourseResourcesScreen> {
                         const SizedBox(height: AppSpacing.md),
                     itemBuilder: (context, index) {
                       if (index == 0) {
-                        return _CourseHeader(course: widget.course);
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _CourseHeader(course: widget.course),
+                            _freshnessHeader(),
+                          ],
+                        );
                       }
                       final resource = _resources[index - 1];
                       return Entrance(
