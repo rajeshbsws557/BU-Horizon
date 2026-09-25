@@ -5,9 +5,10 @@ import 'package:go_router/go_router.dart';
 
 import '../data/university_bus_schedule_data.dart';
 import '../di/di.dart';
-import '../models/models.dart';
 import '../navigation/app_router.dart';
 import '../repositories/exam_repository.dart';
+import '../services/bus_schedule_controller.dart';
+import '../services/home_refresh_state.dart';
 import '../services/next_departure_resolver.dart';
 import '../supabase/session_controller.dart';
 import '../theme/app_theme.dart';
@@ -26,7 +27,12 @@ DateTime Function()? debugUpcomingClock;
 /// two identical grey cards where the departure time — the only thing anyone
 /// actually reads — was the smallest text on screen and never updated.
 class UpcomingSection extends StatefulWidget {
-  const UpcomingSection({super.key});
+  /// Stagger offset for this section's entrance animations, so the three rows
+  /// animate in after whatever sits above them rather than racing it. The
+  /// section moved above the Quick Access grid, so the caller owns the ordering.
+  final int startIndex;
+
+  const UpcomingSection({super.key, this.startIndex = 0});
 
   @override
   State<UpcomingSection> createState() => _UpcomingSectionState();
@@ -44,6 +50,7 @@ class _UpcomingSectionState extends State<UpcomingSection> {
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
     });
+    getIt<BusScheduleController>().ensureLoaded();
   }
 
   @override
@@ -60,12 +67,24 @@ class _UpcomingSectionState extends State<UpcomingSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Entrance(index: 7, child: _UpcomingHeader(now: now)),
+        Entrance(
+          index: widget.startIndex,
+          child: _UpcomingHeader(now: now),
+        ),
         const SizedBox(height: 12),
-        Entrance(index: 8, child: _NextBusHero(now: now)),
+        Entrance(
+          index: widget.startIndex + 1,
+          child: ListenableBuilder(
+            listenable: Listenable.merge([getIt<BusScheduleController>()]),
+            builder: (context, _) => _NextBusHero(
+              now: now,
+              categories: getIt<BusScheduleController>().categories,
+            ),
+          ),
+        ),
         const SizedBox(height: 10),
         Entrance(
-          index: 9,
+          index: widget.startIndex + 2,
           child: ListenableBuilder(
             listenable: session,
             builder: (context, _) => session.isSignedIn
@@ -141,16 +160,19 @@ class _UpcomingHeader extends StatelessWidget {
 /// "No more trips today").
 class _NextBusHero extends StatelessWidget {
   final DateTime now;
-  const _NextBusHero({required this.now});
+  final List<UniversityBusCategory> categories;
+  const _NextBusHero({required this.now, required this.categories});
 
   /// Earliest departure at or after [now] across all student routes, with the
   /// owning route attached.
   static ({UniversityBusRoute route, NextDeparture departure})? _resolve(
     DateTime now,
+    List<UniversityBusCategory> categories,
   ) {
-    final student = UniversityBusScheduleData.categories.firstWhere(
+    if (categories.isEmpty) return null;
+    final student = categories.firstWhere(
       (c) => c.title == 'Student',
-      orElse: () => UniversityBusScheduleData.categories.first,
+      orElse: () => categories.first,
     );
 
     ({UniversityBusRoute route, NextDeparture departure})? best;
@@ -166,15 +188,9 @@ class _NextBusHero extends StatelessWidget {
 
   /// "চিত্রা, বিআরটিসি-০৫" -> ["চিত্রা", "বিআরটিসি-০৫"]. Some evening trips
   /// list six slash-separated coaches, so the caller caps what it renders.
-  static List<String> _busTags(String raw) => raw
-      .split(RegExp(r'[,/]'))
-      .map((s) => s.trim())
-      .where((s) => s.isNotEmpty)
-      .toList();
-
   @override
   Widget build(BuildContext context) {
-    final found = _resolve(now);
+    final found = _resolve(now, categories);
     if (found == null) return const _BusHeroFallback();
 
     final departure = found.departure;
@@ -184,9 +200,11 @@ class _NextBusHero extends StatelessWidget {
       routeName: found.route.routeName,
       departurePlace: departure.departurePlace,
       time: departure.trip.time,
-      tags: _busTags(departure.trip.busName),
+      tags: busOperatorChipLabels(departure.trip.busName),
       countdown: formatCountdown(remaining),
-      isTomorrow: departure.isTomorrow,
+      // '' today, 'Tomorrow' next day, otherwise the weekday — a route that
+      // only runs Fri & Sat can be several days out.
+      dayLabel: formatDepartureDay(departure.daysAhead, departure.departsAt),
       // Inside the resolver's grace beat the bus is at the stop, not late.
       isBoarding: remaining.inSeconds <= 0,
     );
@@ -201,7 +219,7 @@ class _BusHeroBody extends StatelessWidget {
   final String time;
   final List<String> tags;
   final String countdown;
-  final bool isTomorrow;
+  final String dayLabel;
   final bool isBoarding;
 
   const _BusHeroBody({
@@ -210,7 +228,7 @@ class _BusHeroBody extends StatelessWidget {
     required this.time,
     required this.tags,
     required this.countdown,
-    required this.isTomorrow,
+    required this.dayLabel,
     required this.isBoarding,
   });
 
@@ -233,23 +251,13 @@ class _BusHeroBody extends StatelessWidget {
       excludeSemantics: true,
       label: isBoarding
           ? 'Bus departing now from $departurePlace, $routeName at $time. '
-              'Open the bus schedule.'
+                'Open the bus schedule.'
           : 'Next bus in $countdown at $time from $departurePlace, $routeName'
-              '${isTomorrow ? ', tomorrow' : ''}. Open the bus schedule.',
+                '${dayLabel.isEmpty ? '' : ', $dayLabel'}. Open the bus schedule.',
       child: Pressable(
         onTap: () => context.push(AppRoutes.bus),
         child: GlassCard(
-          gradient: context.isLight
-              ? const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFFE8F0FE), Color(0xFFFFFFFF)],
-                )
-              : const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0x332E7DF6), Color(0x18141C2E)],
-                ),
+          gradient: context.colors.heroGradient,
           padding: const EdgeInsets.all(13),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -296,11 +304,11 @@ class _BusHeroBody extends StatelessWidget {
                           color: context.colors.textPrimary,
                         ),
                       ),
-                      // After the last bus of the day, say so rather than
-                      // implying one is still coming.
-                      if (isTomorrow)
+                      // After the last bus of the day, say which day the next
+                      // one leaves rather than implying one is still coming.
+                      if (dayLabel.isNotEmpty)
                         Text(
-                          'Tomorrow',
+                          dayLabel,
                           style: TextStyle(
                             fontSize: 10.5,
                             fontWeight: FontWeight.w700,
@@ -611,39 +619,79 @@ class _UpcomingRow extends StatelessWidget {
 }
 
 /// The signed-in student's next exam, fetched live from their batch schedule.
-class _NextExamRow extends StatelessWidget {
+class _NextExamRow extends StatefulWidget {
   const _NextExamRow();
 
   @override
+  State<_NextExamRow> createState() => _NextExamRowState();
+}
+
+class _NextExamRowState extends State<_NextExamRow> {
+  bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    homeExamItems.addListener(_itemsChanged);
+    if (homeExamItems.value == null) _load();
+  }
+
+  @override
+  void dispose() {
+    homeExamItems.removeListener(_itemsChanged);
+    super.dispose();
+  }
+
+  void _itemsChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _load() async {
+    if (_loading) return;
+    setState(() => _loading = true);
+    try {
+      homeExamItems.value = await getIt<ExamRepository>().fetchExams();
+    } catch (_) {
+      // The row falls back to a clear unavailable state below.
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<ExamItem>>(
-      future: getIt<ExamRepository>().fetchExams(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const _UpcomingRowSkeleton();
-        }
+    if (_loading && homeExamItems.value == null) {
+      return const _UpcomingRowSkeleton();
+    }
 
-        final exams = snapshot.data ?? const <ExamItem>[];
-        if (exams.isEmpty) {
-          return _UpcomingRow(
-            icon: Icons.edit_calendar_rounded,
-            tint: context.colors.purple,
-            title: 'Exam Schedule',
-            subtitle: 'No exams scheduled right now',
-            onTap: () => context.push(AppRoutes.exams),
-          );
-        }
+    final exams = homeExamItems.value;
+    if (exams == null) {
+      return _UpcomingRow(
+        icon: Icons.sync_problem_rounded,
+        tint: context.colors.warning,
+        title: 'Exam schedule unavailable',
+        subtitle: 'Tap to open the schedule and retry',
+        onTap: () => context.push(AppRoutes.exams),
+      );
+    }
+    if (exams.isEmpty) {
+      return _UpcomingRow(
+        icon: Icons.edit_calendar_rounded,
+        tint: context.colors.purple,
+        title: 'Exam Schedule',
+        subtitle: 'No exams scheduled right now',
+        onTap: () => context.push(AppRoutes.exams),
+      );
+    }
 
-        final next = exams.first;
-        final room = next.room.isEmpty ? '' : ' · Room ${next.room}';
-        return _UpcomingRow(
-          icon: Icons.edit_calendar_rounded,
-          tint: context.colors.purple,
-          title: '${next.typeLabel} · ${next.title}',
-          subtitle: '${next.dateLabel} · ${next.timeLabel}$room',
-          onTap: () => context.push(AppRoutes.exams),
-        );
-      },
+    final next = exams.first;
+    final room = next.room.isEmpty ? '' : ' · Room ${next.room}';
+    return _UpcomingRow(
+      icon: Icons.edit_calendar_rounded,
+      tint: context.colors.purple,
+      title: '${next.typeLabel} · ${next.title}',
+      subtitle: '${next.dateLabel} · ${next.timeLabel}$room',
+      onTap: () => context.push(AppRoutes.exams),
     );
   }
 }

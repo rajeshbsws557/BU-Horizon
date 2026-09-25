@@ -30,6 +30,8 @@ class _LostFoundView extends StatefulWidget {
 class _LostFoundViewState extends State<_LostFoundView> {
   bool _loading = true;
   List<LostFoundItem> _items = const [];
+  String? _error;
+  DateTime? _lastUpdatedAt;
 
   @override
   void initState() {
@@ -38,18 +40,24 @@ class _LostFoundViewState extends State<_LostFoundView> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = _items.isEmpty;
+      _error = null;
+    });
     try {
       final items = await getIt<LostFoundRepository>().fetchItems();
       if (!mounted) return;
       setState(() {
         _items = items;
         _loading = false;
+        _lastUpdatedAt = DateTime.now();
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loading = false);
-      showToast(context, 'Could not load lost & found items');
+      setState(() {
+        _loading = false;
+        _error = 'Could not load lost & found items.';
+      });
     }
   }
 
@@ -109,26 +117,86 @@ class _LostFoundViewState extends State<_LostFoundView> {
                   semanticsLabel: 'Refresh lost and found items',
                   child: _loading
                       ? const _LostFoundSkeletonList()
+                      : _error != null && _items.isEmpty
+                          ? RetryStateList(
+                              title: 'Lost & Found unavailable',
+                              message: _error!,
+                              onRetry: _load,
+                            )
                       : visible.isEmpty
-                          ? EmptyState(
-                              icon: tab == 0
-                                  ? Icons.search_off_rounded
-                                  : Icons.inventory_2_outlined,
-                              title: tab == 0 ? 'No lost items' : 'No found items',
-                              message: 'Nothing reported yet. Be the first to post one below.',
+                          ? ListView(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              padding: const EdgeInsets.all(16),
+                              children: [
+                                if (_error != null) ...[
+                                  DataStateBanner(
+                                    message:
+                                        'Could not refresh Lost & Found. Showing the last loaded data.',
+                                    tone: DataStateTone.warning,
+                                    onRetry: _load,
+                                  ),
+                                  const SizedBox(height: 10),
+                                ],
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: LastUpdatedLabel(
+                                    updatedAt: _lastUpdatedAt,
+                                    emptyLabel:
+                                        'Lost & Found not synced yet',
+                                  ),
+                                ),
+                                const SizedBox(height: 74),
+                                EmptyState(
+                                  icon: tab == 0
+                                      ? Icons.search_off_rounded
+                                      : Icons.inventory_2_outlined,
+                                  title: tab == 0
+                                      ? 'No lost items'
+                                      : 'No found items',
+                                  message:
+                                      'Nothing reported yet. Be the first to post one below.',
+                                ),
+                              ],
                             )
                           : ListView.separated(
                               physics: const AlwaysScrollableScrollPhysics(),
                               padding: const EdgeInsets.all(16),
-                              itemCount: visible.length,
-                              separatorBuilder: (_, __) => const SizedBox(height: 12),
-                              itemBuilder: (_, i) => Entrance(
-                                index: i,
-                                child: _ItemCard(
-                                  item: visible[i],
-                                  onTap: () => _openItemDetail(visible[i]),
-                                ),
-                              ),
+                              itemCount: visible.length + 1,
+                              separatorBuilder: (_, index) =>
+                                  SizedBox(height: index == 0 ? 14 : 12),
+                              itemBuilder: (_, index) {
+                                if (index == 0) {
+                                  return Column(
+                                    children: [
+                                      if (_error != null) ...[
+                                        DataStateBanner(
+                                          message:
+                                              'Could not refresh Lost & Found. Showing the last loaded data.',
+                                          tone: DataStateTone.warning,
+                                          onRetry: _load,
+                                        ),
+                                        const SizedBox(height: 10),
+                                      ],
+                                      Align(
+                                        alignment: Alignment.centerRight,
+                                        child: LastUpdatedLabel(
+                                          updatedAt: _lastUpdatedAt,
+                                          emptyLabel:
+                                              'Lost & Found not synced yet',
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                }
+                                final i = index - 1;
+                                return Entrance(
+                                  index: i,
+                                  child: _ItemCard(
+                                    item: visible[i],
+                                    onTap: () => _openItemDetail(visible[i]),
+                                  ),
+                                );
+                              },
                             ),
                 );
               },

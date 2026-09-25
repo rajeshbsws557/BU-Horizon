@@ -159,4 +159,149 @@ void main() {
       expect(formatCountdown(const Duration(seconds: -5)), 'Now');
     });
   });
+
+  // ── Day-aware resolution ────────────────────────────────────────────────
+  //
+  // Route 07 publishes an evening-only কর্মদিবস timetable and a near all-day
+  // সাপ্তাহিক ছুটি one. Before [ServiceDays] existed the resolver rolled any
+  // past trip to "tomorrow" regardless of weekday, so the Home hero happily
+  // advertised a Friday-only 9:00 AM bus on a Tuesday morning. These pin that
+  // it no longer can.
+  group('ServiceDays.runsOn', () {
+    test('workdays covers Sun–Thu and excludes Fri & Sat', () {
+      expect(ServiceDays.workdays.runsOn(DateTime(2026, 8, 9)), isTrue); // Sun
+      expect(ServiceDays.workdays.runsOn(DateTime(2026, 8, 5)), isTrue); // Wed
+      expect(ServiceDays.workdays.runsOn(DateTime(2026, 8, 7)), isFalse); // Fri
+      expect(ServiceDays.workdays.runsOn(DateTime(2026, 8, 8)), isFalse); // Sat
+    });
+
+    test('weekend covers exactly Fri & Sat', () {
+      expect(ServiceDays.weekend.runsOn(DateTime(2026, 8, 7)), isTrue); // Fri
+      expect(ServiceDays.weekend.runsOn(DateTime(2026, 8, 8)), isTrue); // Sat
+      expect(ServiceDays.weekend.runsOn(DateTime(2026, 8, 9)), isFalse); // Sun
+    });
+
+    test('daily covers every day, so existing routes are unaffected', () {
+      for (var day = 3; day <= 9; day++) {
+        expect(ServiceDays.daily.runsOn(DateTime(2026, 8, day)), isTrue);
+      }
+    });
+  });
+
+  group('nextServiceOccurrence', () {
+    test('daily behaves exactly like the old today-or-tomorrow rollover', () {
+      // Wednesday 6:00 PM, asking for a 9:00 AM slot that has gone.
+      final next = nextServiceOccurrence(
+        ServiceDays.daily,
+        minutesOfDay: 9 * 60,
+        now: DateTime(2026, 8, 5, 18, 0),
+      );
+      expect(next, DateTime(2026, 8, 6, 9, 0));
+    });
+
+    test('weekend-only slot on a Wednesday lands on the coming Friday', () {
+      final next = nextServiceOccurrence(
+        ServiceDays.weekend,
+        minutesOfDay: 9 * 60,
+        now: DateTime(2026, 8, 5, 8, 0), // Wed morning, before 9
+      );
+      expect(next, DateTime(2026, 8, 7, 9, 0)); // Friday, not "today"
+    });
+
+    test('weekend-only slot late on Saturday waits for the next Friday', () {
+      final next = nextServiceOccurrence(
+        ServiceDays.weekend,
+        minutesOfDay: 9 * 60,
+        now: DateTime(2026, 8, 8, 23, 0), // Sat night
+      );
+      expect(next, DateTime(2026, 8, 14, 9, 0)); // the following Friday
+    });
+
+    test('workdays-only slot on a Friday waits for Sunday', () {
+      final next = nextServiceOccurrence(
+        ServiceDays.workdays,
+        minutesOfDay: 18 * 60,
+        now: DateTime(2026, 8, 7, 12, 0), // Fri midday
+      );
+      expect(next, DateTime(2026, 8, 9, 18, 0)); // Sunday
+    });
+
+    test('keeps a just-departed slot inside the grace window', () {
+      final next = nextServiceOccurrence(
+        ServiceDays.weekend,
+        minutesOfDay: 9 * 60,
+        now: DateTime(2026, 8, 7, 9, 0, 30), // Fri, 30s after departure
+      );
+      expect(next, DateTime(2026, 8, 7, 9, 0));
+    });
+  });
+
+  group('resolveNextDeparture with mixed service days', () {
+    // A miniature Route 07: evening service Sun–Thu, morning service Fri & Sat.
+    const mixed = <DepartureSection>[
+      DepartureSection(
+        departurePlace: 'বিশ্ববিদ্যালয়',
+        serviceDays: ServiceDays.workdays,
+        trips: [BusTripItem(time: '6:00 PM', busName: 'সন্ধ্যা')],
+      ),
+      DepartureSection(
+        departurePlace: 'রুপাতলী',
+        serviceDays: ServiceDays.weekend,
+        trips: [BusTripItem(time: '9:00 AM', busName: 'সুগন্ধা')],
+      ),
+    ];
+
+    test('Tuesday morning picks the evening workday bus, not the 9 AM one', () {
+      // The exact bug this guards: at 8:00 AM on a Tuesday the globally
+      // earliest clock time is 9:00 AM, but that bus only runs Fri & Sat.
+      final next = resolveNextDeparture(
+        mixed,
+        now: DateTime(2026, 8, 11, 8, 0), // Tuesday
+      )!;
+
+      expect(next.trip.time, '6:00 PM');
+      expect(next.serviceDays, ServiceDays.workdays);
+      expect(next.daysAhead, 0);
+    });
+
+    test('Friday morning picks the weekend bus and skips the workday one', () {
+      final next = resolveNextDeparture(
+        mixed,
+        now: DateTime(2026, 8, 7, 8, 0), // Friday
+      )!;
+
+      expect(next.trip.time, '9:00 AM');
+      expect(next.serviceDays, ServiceDays.weekend);
+      expect(next.daysAhead, 0);
+    });
+
+    test('reports days ahead so the UI can name the weekday', () {
+      const weekendOnly = <DepartureSection>[
+        DepartureSection(
+          departurePlace: 'রুপাতলী',
+          serviceDays: ServiceDays.weekend,
+          trips: [BusTripItem(time: '9:00 AM', busName: 'সুগন্ধা')],
+        ),
+      ];
+
+      // Wednesday -> the coming Friday is two days out, so "Tomorrow" would lie.
+      final next = resolveNextDeparture(
+        weekendOnly,
+        now: DateTime(2026, 8, 5, 10, 0),
+      )!;
+
+      expect(next.daysAhead, 2);
+      expect(next.isTomorrow, isFalse);
+      expect(formatDepartureDay(next.daysAhead, next.departsAt), 'Friday');
+    });
+  });
+
+  group('formatDepartureDay', () {
+    test('stays silent for today and names the day otherwise', () {
+      expect(formatDepartureDay(0, DateTime(2026, 8, 5, 18, 0)), '');
+      expect(formatDepartureDay(1, DateTime(2026, 8, 6, 9, 0)), 'Tomorrow');
+      expect(formatDepartureDay(2, DateTime(2026, 8, 7, 9, 0)), 'Friday');
+      expect(formatDepartureDay(6, DateTime(2026, 8, 11, 9, 0)), 'Tuesday');
+    });
+  });
 }

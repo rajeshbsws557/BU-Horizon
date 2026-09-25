@@ -19,6 +19,8 @@ class AlertsScreen extends StatefulWidget {
 class _AlertsScreenState extends State<AlertsScreen> {
   bool _loading = true;
   List<ClassNotice> _notices = const [];
+  String? _error;
+  DateTime? _lastUpdatedAt;
 
   @override
   void initState() {
@@ -27,17 +29,26 @@ class _AlertsScreenState extends State<AlertsScreen> {
   }
 
   Future<void> _load() async {
-    if (mounted) setState(() => _loading = true);
+    if (mounted) {
+      setState(() {
+        _loading = _notices.isEmpty;
+        _error = null;
+      });
+    }
     try {
       final notices = await getIt<NoticeRepository>().fetchNotices();
       if (!mounted) return;
       setState(() {
         _notices = notices;
         _loading = false;
+        _lastUpdatedAt = DateTime.now();
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loading = false);
+      setState(() {
+        _loading = false;
+        _error = 'Could not load the latest public notices.';
+      });
     }
   }
 
@@ -58,12 +69,26 @@ class _AlertsScreenState extends State<AlertsScreen> {
                 onRefresh: _load,
                 child: _loading
                     ? const _SkeletonList()
+                    : _error != null && _notices.isEmpty
+                    ? RetryStateList(
+                        title: 'Public notices unavailable',
+                        message: _error!,
+                        onRetry: _load,
+                      )
                     : _notices.isEmpty
                     ? ListView(
                         physics: const AlwaysScrollableScrollPhysics(),
-                        children: const [
-                          SizedBox(height: 120),
-                          EmptyState(
+                        padding: const EdgeInsets.all(16),
+                        children: [
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: LastUpdatedLabel(
+                              updatedAt: _lastUpdatedAt,
+                              emptyLabel: 'Public notices not synced yet',
+                            ),
+                          ),
+                          const SizedBox(height: 92),
+                          const EmptyState(
                             icon: Icons.campaign_outlined,
                             title: 'No public notices yet',
                             message:
@@ -74,12 +99,39 @@ class _AlertsScreenState extends State<AlertsScreen> {
                     : ListView.separated(
                         physics: const AlwaysScrollableScrollPhysics(),
                         padding: const EdgeInsets.all(16),
-                        itemCount: _notices.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 12),
-                        itemBuilder: (_, i) => Entrance(
-                          index: i,
-                          child: _NoticeCard(notice: _notices[i]),
-                        ),
+                        itemCount: _notices.length + 1,
+                        separatorBuilder: (_, index) =>
+                            SizedBox(height: index == 0 ? 14 : 12),
+                        itemBuilder: (_, index) {
+                          if (index == 0) {
+                            return Column(
+                              children: [
+                                if (_error != null) ...[
+                                  DataStateBanner(
+                                    message:
+                                        'Could not refresh public notices. Showing the last loaded list.',
+                                    tone: DataStateTone.warning,
+                                    onRetry: _load,
+                                  ),
+                                  const SizedBox(height: 10),
+                                ],
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: LastUpdatedLabel(
+                                    updatedAt: _lastUpdatedAt,
+                                    emptyLabel:
+                                        'Public notices not synced yet',
+                                  ),
+                                ),
+                              ],
+                            );
+                          }
+                          final i = index - 1;
+                          return Entrance(
+                            index: i,
+                            child: _NoticeCard(notice: _notices[i]),
+                          );
+                        },
                       ),
               ),
             ),

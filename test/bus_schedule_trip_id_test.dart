@@ -51,6 +51,57 @@ void main() {
     );
   });
 
+  // Route 07 runs the same clock time from the same stop on both its
+  // timetables (6:00 PM on কর্মদিবস and again on the ছুটি), so the day pattern
+  // is part of a trip's identity — otherwise one alarm would silently serve two
+  // different buses.
+  test('day-scoped trips at the same place and time do not collide', () {
+    const routeId = 'student_route_07';
+    const place = 'বিশ্ববিদ্যালয়';
+    const time = '6:00 PM';
+
+    final workday = busScheduleTripId(
+      routeId,
+      place,
+      time,
+      ServiceDays.workdays,
+    );
+    final weekend = busScheduleTripId(
+      routeId,
+      place,
+      time,
+      ServiceDays.weekend,
+    );
+
+    expect(workday, isNot(weekend));
+    expect(workday, endsWith('__workdays'));
+    expect(weekend, endsWith('__weekend'));
+  });
+
+  test('daily ids keep the pre-ServiceDays formula so stored alarms survive',
+      () {
+    // An alarm the current build persisted is keyed by this exact string. If the
+    // suffix ever leaked onto daily routes, every existing alarm would orphan.
+    final route = UniversityBusScheduleData.categories.first.routes.first;
+    final section = route.departureSections.first;
+    final trip = section.trips.first;
+
+    expect(
+      busScheduleTripId(route.id, section.departurePlace, trip.time),
+      '${route.id}__${section.departurePlace}__${trip.time}',
+    );
+    // Omitting the parameter and passing `daily` explicitly must agree.
+    expect(
+      busScheduleTripId(route.id, section.departurePlace, trip.time),
+      busScheduleTripId(
+        route.id,
+        section.departurePlace,
+        trip.time,
+        ServiceDays.daily,
+      ),
+    );
+  });
+
   testWidgets(
       'list-row Set Alarm resolves the same trip id the spotlight stored',
       (WidgetTester tester) async {

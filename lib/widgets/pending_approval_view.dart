@@ -2,19 +2,16 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../di/di.dart';
 import '../navigation/app_router.dart';
-import '../supabase/session_controller.dart';
 import '../theme/app_theme.dart';
 
 /// A polished full-screen state shown to provisional students whose account is
 /// still `pending_verification`, in place of batch-scoped content (class
 /// notices, attendance, exams, resources).
 ///
-/// It explains why the batch content is locked and points them to the two ways
-/// forward: ask their CR to approve the account, or add their university email
-/// once issued (which auto-verifies them). Guests / already-active students
-/// never see this — callers gate on `profile.isPendingVerification`.
+/// It explains why the batch content is locked and points them to the way
+/// forward: ask their CR to approve the account. Guests / already-active
+/// students never see this — callers gate on `profile.isPendingVerification`.
 class PendingApprovalView extends StatelessWidget {
   /// The feature being gated, e.g. 'class notices', 'attendance'. Used to make
   /// the copy specific.
@@ -24,8 +21,6 @@ class PendingApprovalView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final profile = getIt<SessionController>().profile;
-    final isProvisional = profile?.isProvisional == true;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -118,39 +113,31 @@ class PendingApprovalView extends StatelessWidget {
                         _Step(
                           icon: Icons.groups_rounded,
                           color: context.colors.primary,
-                          title: 'Contact your CR',
+                          title: 'Contact your Class Representative',
                           subtitle:
-                              'Ask your Class Representative to approve your '
-                              'account from the app. They can verify you belong '
-                              'to the batch.',
-                        ),
-                        const SizedBox(height: 14),
-                        _Step(
-                          icon: Icons.mark_email_read_outlined,
-                          color: context.colors.success,
-                          title: 'Or add your university email',
-                          subtitle:
-                              'Once your @bu.ac.bd email is issued, add it from '
-                              'your profile to verify instantly — no approval '
-                              'needed.',
+                              'Ask your CR to approve your account from the '
+                              'app. Once approved, your batch content will be '
+                              'unlocked instantly.',
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 22),
-                  if (isProvisional)
-                    FilledButton.icon(
-                      onPressed: () => context.push(AppRoutes.profile),
-                      icon: const Icon(Icons.person_outline_rounded, size: 18),
-                      label: const Text('Go to My Profile'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: context.colors.primary,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                  // Always reachable: this is the one screen a pending student
+                  // can act from, so it must never be a dead end.
+                  FilledButton.icon(
+                    onPressed: () => context.push(AppRoutes.profile),
+                    icon: const Icon(Icons.person_outline_rounded, size: 18),
+                    label: const Text('Go to My Profile'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: context.colors.primary,
+                      minimumSize: const Size(44, 48),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
                     ),
+                  ),
                 ],
               ),
             ),

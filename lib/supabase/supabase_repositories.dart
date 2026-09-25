@@ -290,7 +290,9 @@ final class SupabaseClassScheduleRepository implements ClassScheduleRepository {
       final sessions = (row['class_sessions'] as List<dynamic>? ?? const [])
           .cast<Map<String, dynamic>>()
           .where((s) => s['deleted_at'] == null);
-      final sessionId = sessions.isEmpty ? null : sessions.first['id'] as String?;
+      final sessionId = sessions.isEmpty
+          ? null
+          : sessions.first['id'] as String?;
       return ScheduledClass(
         id: row['id'] as String,
         offeringId: (row['offering_id'] as String?) ?? offeringId,
@@ -349,7 +351,9 @@ final class SupabaseLegalHelpRepository implements LegalHelpRepository {
       // Anonymous reports (and guest submissions) carry no reporter identity.
       'reporter_id': draft.isAnonymous ? null : _uid,
       'is_anonymous': draft.isAnonymous,
-      'reporter_name': draft.isAnonymous ? null : _nullIfBlank(draft.reporterName),
+      'reporter_name': draft.isAnonymous
+          ? null
+          : _nullIfBlank(draft.reporterName),
       'contact_email': _nullIfBlank(draft.contactEmail),
       'contact_phone': _nullIfBlank(draft.contactPhone),
       'category': draft.category.wire,
@@ -448,7 +452,7 @@ final class SupabaseAttendanceRepository implements AttendanceRepository {
           .from('class_sessions')
           .select(
             'id, offering_id, session_date, start_time, end_time, topic, '
-            'attendance_records(student_id, status)',
+            'attendance_records(id, student_id, status)',
           )
           .eq('offering_id', offeringId)
           .isFilter('deleted_at', null)
@@ -457,14 +461,30 @@ final class SupabaseAttendanceRepository implements AttendanceRepository {
       return result.cast<Map<String, dynamic>>();
     });
 
+    final correctionRows = await _client
+        .from('attendance_correction_requests')
+        .select(
+          'session_id, status, requested_status, reason, created_at, reviewed_at',
+        )
+        .eq('student_id', uid)
+        .order('created_at', ascending: false);
+    final correctionBySession = <String, Map<String, dynamic>>{};
+    for (final row in correctionRows) {
+      correctionBySession.putIfAbsent(row['session_id'] as String, () => row);
+    }
+
     return rows.map((row) {
       final records = (row['attendance_records'] as List<dynamic>? ?? const [])
           .cast<Map<String, dynamic>>();
       AttendanceMark? ownStatus;
+      String? ownRecordId;
       var presentCount = 0;
       for (final record in records) {
         final status = _mark(record['status'] as String?);
-        if (record['student_id'] == uid) ownStatus = status;
+        if (record['student_id'] == uid) {
+          ownStatus = status;
+          ownRecordId = record['id'] as String?;
+        }
         if (status == AttendanceMark.present) presentCount++;
       }
       return AttendanceSession(
@@ -475,10 +495,47 @@ final class SupabaseAttendanceRepository implements AttendanceRepository {
         endTime: row['end_time'] as String?,
         topic: (row['topic'] as String?) ?? '',
         status: ownStatus,
+        recordId: ownRecordId,
+        correctionStatus:
+            correctionBySession[row['id'] as String]?['status'] as String?,
+        correctionRequestedStatus: _mark(
+          correctionBySession[row['id'] as String]?['requested_status']
+              as String?,
+        ),
+        correctionReason:
+            correctionBySession[row['id'] as String]?['reason'] as String?,
+        correctionRequestedAt: DateTime.tryParse(
+          correctionBySession[row['id'] as String]?['created_at']?.toString() ??
+              '',
+        )?.toLocal(),
+        correctionReviewedAt: DateTime.tryParse(
+          correctionBySession[row['id'] as String]?['reviewed_at']
+                  ?.toString() ??
+              '',
+        )?.toLocal(),
         presentCount: presentCount,
         recordCount: records.length,
       );
     }).toList();
+  }
+
+  @override
+  Future<void> requestCorrection({
+    required AttendanceSession session,
+    required AttendanceMark requestedStatus,
+    required String reason,
+  }) async {
+    final uid = _uid;
+    if (uid == null) throw StateError('Sign in required');
+    final batchId = await _requireCurrentBatchId();
+    await _client.from('attendance_correction_requests').insert({
+      'record_id': session.recordId,
+      'session_id': session.id,
+      'student_id': uid,
+      'batch_id': batchId,
+      'requested_status': requestedStatus.wireValue,
+      'reason': _nullIfBlank(reason),
+    });
   }
 
   @override
@@ -606,10 +663,11 @@ final class SupabaseAttendanceRepository implements AttendanceRepository {
         .eq('offering_id', offeringId)
         .isFilter('deleted_at', null);
     if (sessionId != null) sessionQuery = sessionQuery.eq('id', sessionId);
-    final sessionRows = (await sessionQuery
-            .order('session_date', ascending: true)
-            .order('start_time', ascending: true))
-        .cast<Map<String, dynamic>>();
+    final sessionRows =
+        (await sessionQuery
+                .order('session_date', ascending: true)
+                .order('start_time', ascending: true))
+            .cast<Map<String, dynamic>>();
 
     final sessions = <AttendanceExportSession>[];
     // studentId -> (sessionId -> mark)
@@ -625,9 +683,8 @@ final class SupabaseAttendanceRepository implements AttendanceRepository {
           topic: (row['topic'] as String?) ?? '',
         ),
       );
-      final records =
-          (row['attendance_records'] as List<dynamic>? ?? const [])
-              .cast<Map<String, dynamic>>();
+      final records = (row['attendance_records'] as List<dynamic>? ?? const [])
+          .cast<Map<String, dynamic>>();
       for (final record in records) {
         final mark = _mark(record['status'] as String?);
         if (mark == null) continue;
@@ -656,7 +713,6 @@ final class SupabaseAttendanceRepository implements AttendanceRepository {
       students: students,
     );
   }
-
 
   @override
   Future<List<CourseAttendance>> courseSummaries() async {
@@ -807,27 +863,33 @@ final class SupabaseExamRepository implements ExamRepository {
     required String examId,
     required ExamInput input,
   }) async {
-    await _client.from('exams').update({
-      'type': _typeValue(input.type),
-      'title': input.title.trim(),
-      'description': input.description?.trim().isEmpty == true
-          ? null
-          : input.description?.trim(),
-      'exam_date': input.examDate != null
-          ? DateFormat('yyyy-MM-dd').format(input.examDate!)
-          : null,
-      'start_time': _fmtTimeStr(input.startTime),
-      'end_time': _fmtTimeStr(input.endTime),
-      'room': input.room?.trim().isEmpty == true ? null : input.room?.trim(),
-      'updated_at': DateTime.now().toUtc().toIso8601String(),
-    }).eq('id', examId);
+    await _client
+        .from('exams')
+        .update({
+          'type': _typeValue(input.type),
+          'title': input.title.trim(),
+          'description': input.description?.trim().isEmpty == true
+              ? null
+              : input.description?.trim(),
+          'exam_date': input.examDate != null
+              ? DateFormat('yyyy-MM-dd').format(input.examDate!)
+              : null,
+          'start_time': _fmtTimeStr(input.startTime),
+          'end_time': _fmtTimeStr(input.endTime),
+          'room': input.room?.trim().isEmpty == true
+              ? null
+              : input.room?.trim(),
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', examId);
   }
 
   @override
   Future<void> deleteExam(String examId) async {
-    await _client.from('exams').update({
-      'deleted_at': DateTime.now().toUtc().toIso8601String(),
-    }).eq('id', examId);
+    await _client
+        .from('exams')
+        .update({'deleted_at': DateTime.now().toUtc().toIso8601String()})
+        .eq('id', examId);
   }
 }
 
@@ -1116,15 +1178,17 @@ final class SupabaseBusScheduleRepository implements BusScheduleRepository {
   }
 
   @override
-  Future<List<UniversityBusCategory>> fetchCategories() async {
+  Future<BusSchedulePage> fetchPage({int offset = 0, int limit = 20}) async {
     // One request: routes with their trips embedded via the FK relationship.
     final rows = await _client
         .from('bus_routes')
         .select(
           'id, category, name, description, manager_info, sort_order, '
-          'bus_trips(departure_place, depart_time, bus_name, sort_order)',
+          'bus_trips(departure_place, depart_time, bus_name, service_days, '
+          'section_note, sort_order)',
         )
-        .order('sort_order', ascending: true);
+        .order('sort_order', ascending: true)
+        .range(offset, offset + limit - 1);
 
     // Categories keep the app's canonical order; unknown ones append after.
     const knownOrder = ['Student', 'Teacher', 'Staff'];
@@ -1138,23 +1202,45 @@ final class SupabaseBusScheduleRepository implements BusScheduleRepository {
               ),
             );
 
-      // Group trips into departure sections, in first-seen (seed) order.
-      final sections = <String, List<BusTripItem>>{};
+      // Group trips into departure sections keyed by place *and* day pattern,
+      // in first-seen (seed) order. Keying on place alone would merge a route's
+      // two timetables into one impossible list — Route 07 leaves
+      // বিশ্ববিদ্যালয় at 6:00 PM on কর্মদিবস and again at 6:00 PM on the ছুটি.
+      final sections = <(String, ServiceDays), List<BusTripItem>>{};
+      final notes = <(String, ServiceDays), String>{};
       for (final trip in trips) {
         final place = (trip['departure_place'] as String?) ?? '';
         if (place.isEmpty) continue;
+        final key = (
+          place,
+          serviceDaysFromKey(trip['service_days'] as String?),
+        );
         sections
-            .putIfAbsent(place, () => [])
+            .putIfAbsent(key, () => [])
             .add(
               BusTripItem(
                 time: (trip['depart_time'] as String?) ?? '',
                 busName: (trip['bus_name'] as String?) ?? '',
               ),
             );
+        final note = (trip['section_note'] as String?)?.trim();
+        if (note != null && note.isNotEmpty) notes.putIfAbsent(key, () => note);
       }
       for (final list in sections.values) {
         list.sort((a, b) => _minutesOf(a.time).compareTo(_minutesOf(b.time)));
       }
+
+      // Present one whole day pattern before the next, so a live route reads
+      // the same way as the bundled fallback. Decorated with the first-seen
+      // index because Dart's List.sort is not guaranteed stable.
+      final keys = sections.keys.toList();
+      final firstSeen = {
+        for (var i = 0; i < keys.length; i++) keys[i]: i,
+      };
+      keys.sort((a, b) {
+        final byDays = a.$2.index.compareTo(b.$2.index);
+        return byDays != 0 ? byDays : firstSeen[a]!.compareTo(firstSeen[b]!);
+      });
 
       final category = (row['category'] as String?) ?? 'Student';
       byCategory
@@ -1166,8 +1252,13 @@ final class SupabaseBusScheduleRepository implements BusScheduleRepository {
               routeDescription: row['description'] as String?,
               managerInfo: row['manager_info'] as String?,
               departureSections: [
-                for (final e in sections.entries)
-                  DepartureSection(departurePlace: e.key, trips: e.value),
+                for (final key in keys)
+                  DepartureSection(
+                    departurePlace: key.$1,
+                    serviceDays: key.$2,
+                    note: notes[key],
+                    trips: sections[key]!,
+                  ),
               ],
             ),
           );
@@ -1177,10 +1268,43 @@ final class SupabaseBusScheduleRepository implements BusScheduleRepository {
       ...knownOrder.where(byCategory.containsKey),
       ...byCategory.keys.where((c) => !knownOrder.contains(c)),
     ];
-    return [
+    final categories = [
       for (final title in titles)
         UniversityBusCategory(title: title, routes: byCategory[title]!),
     ];
+    return BusSchedulePage(
+      categories: categories,
+      hasMore: rows.length == limit,
+    );
+  }
+
+  @override
+  Future<Set<String>> fetchFavoriteRouteIds() async {
+    final uid = _uid;
+    if (uid == null) return const <String>{};
+    final rows = await _client
+        .from('bus_route_favorites')
+        .select('route_id')
+        .eq('profile_id', uid);
+    return rows.map((row) => row['route_id'] as String).toSet();
+  }
+
+  @override
+  Future<void> setFavorite(String routeId, bool favorite) async {
+    final uid = _uid;
+    if (uid == null) throw StateError('Sign in required');
+    if (favorite) {
+      await _client.from('bus_route_favorites').upsert({
+        'profile_id': uid,
+        'route_id': routeId,
+      });
+    } else {
+      await _client
+          .from('bus_route_favorites')
+          .delete()
+          .eq('profile_id', uid)
+          .eq('route_id', routeId);
+    }
   }
 }
 
@@ -1234,7 +1358,9 @@ final class SupabaseBloodRepository implements BloodRepository {
     // Oldest still-active request first; take one as the current spotlight.
     final rows = await _client
         .from('active_urgent_blood_requests')
-        .select('id, requester_id, blood_group, units, contact, location, note, is_urgent, created_at')
+        .select(
+          'id, requester_id, blood_group, units, contact, location, note, is_urgent, created_at',
+        )
         .order('created_at', ascending: true)
         .limit(1);
     if (rows.isEmpty) return null;
@@ -1313,6 +1439,115 @@ final class SupabaseBloodRepository implements BloodRepository {
           'updated_at': DateTime.now().toUtc().toIso8601String(),
         })
         .eq('id', requestId);
+  }
+
+  @override
+  Future<BloodDonorRegistration?> fetchMyDonorRegistration() async {
+    final uid = _uid;
+    if (uid == null) return null;
+    final rows = await _client
+        .from('blood_donors')
+        .select('blood_group, contact, last_donated, available')
+        .eq('profile_id', uid)
+        .limit(1);
+    if (rows.isEmpty) return null;
+    final row = rows.first;
+    return BloodDonorRegistration(
+      group: _group(row['blood_group'] as String?),
+      contact: (row['contact'] as String?) ?? '',
+      lastDonated: DateTime.tryParse(row['last_donated']?.toString() ?? ''),
+      available: (row['available'] as bool?) ?? true,
+    );
+  }
+
+  @override
+  Future<void> saveDonorRegistration(
+    BloodDonorRegistration registration,
+  ) async {
+    final uid = _uid;
+    if (uid == null) throw StateError('Sign in required');
+    await _client.from('blood_donors').upsert({
+      'profile_id': uid,
+      'blood_group': registration.group.label,
+      'contact': _nullIfBlank(registration.contact),
+      'last_donated': registration.lastDonated == null
+          ? null
+          : DateFormat('yyyy-MM-dd').format(registration.lastDonated!),
+      'available': registration.available,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    }, onConflict: 'profile_id');
+  }
+}
+
+final class SupabaseNotificationRepository implements NotificationRepository {
+  @override
+  Future<NotificationPage> fetchPage({int offset = 0, int limit = 20}) async {
+    final uid = _uid;
+    if (uid == null) return const NotificationPage(items: [], hasMore: false);
+    final rows = await _client
+        .from('notifications')
+        .select('id, title, body, entity_type, entity_id, is_read, created_at')
+        .eq('recipient_id', uid)
+        .order('created_at', ascending: false)
+        .range(offset, offset + limit - 1);
+    return NotificationPage(
+      items: rows
+          .map(
+            (row) => AppNotification(
+              id: row['id'] as String,
+              title: (row['title'] as String?) ?? '',
+              body: (row['body'] as String?) ?? '',
+              entityType: (row['entity_type'] as String?) ?? '',
+              entityId: row['entity_id'] as String?,
+              isRead: (row['is_read'] as bool?) ?? false,
+              createdAt:
+                  DateTime.tryParse(
+                    row['created_at']?.toString() ?? '',
+                  )?.toLocal() ??
+                  DateTime.now(),
+            ),
+          )
+          .toList(),
+      hasMore: rows.length == limit,
+    );
+  }
+
+  @override
+  Future<int> unreadCount() async {
+    final uid = _uid;
+    if (uid == null) return 0;
+    final result = await _client
+        .from('notifications')
+        .select('id')
+        .eq('recipient_id', uid)
+        .eq('is_read', false)
+        .count(CountOption.exact);
+    return result.count;
+  }
+
+  @override
+  Future<void> markRead(String id) async {
+    await _client
+        .from('notifications')
+        .update({
+          'is_read': true,
+          'read_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', id);
+  }
+
+  @override
+  Future<void> markAllRead() async {
+    final uid = _uid;
+    if (uid == null) return;
+    await _client
+        .from('notifications')
+        .update({
+          'is_read': true,
+          'read_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('recipient_id', uid)
+        .eq('is_read', false);
   }
 }
 

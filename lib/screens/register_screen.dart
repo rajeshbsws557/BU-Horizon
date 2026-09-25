@@ -194,12 +194,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         await showSuccessDialog(
           context,
           title: 'Account Created!',
-          message: _noUniversityEmail
-              ? 'Almost there — confirm your personal email from your inbox, '
-                  'then sign in. Your account will be reviewed by an admin or '
-                  'your class representative before it is fully activated.'
-              : 'Almost there — check your inbox to confirm your email, '
-                  'then sign in to BU Horizon.',
+          message: 'Almost there — confirm your email from your inbox, '
+              'then sign in. Your account will be reviewed by your class '
+              'representative before batch content is unlocked.',
           primaryLabel: 'Go to Sign In',
         );
         if (!mounted) return;
@@ -210,13 +207,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         await showSuccessDialog(
           context,
           title: 'Welcome to BU Horizon!',
-          message: _noUniversityEmail
-              ? 'Your provisional account was created. An admin or your class '
-                  'representative will review it shortly. You can add your '
-                  '@bu.ac.bd email later from your profile to become fully '
-                  'verified.'
-              : 'Your account was created successfully. Let\'s get you '
-                  'started.',
+          message: 'Your account was created. Your class representative '
+              'will review it shortly — once approved, your batch content '
+              'will be unlocked.',
           primaryLabel: 'Continue',
         );
         if (!mounted) return;

@@ -1,5 +1,25 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+/// Text/icon ink that stays legible on a saturated [fill].
+///
+/// Picks whichever of dark ink or white actually has more contrast against the
+/// fill, so a filled chip stays readable in every palette and mode instead of
+/// hard-coding white (which fails on the brighter accents).
+Color inkOn(Color fill) {
+  const darkInk = Color(0xFF06121F);
+  return _contrastRatio(darkInk, fill) > _contrastRatio(Colors.white, fill)
+      ? darkInk
+      : Colors.white;
+}
+
+double _contrastRatio(Color a, Color b) {
+  final x = a.computeLuminance();
+  final y = b.computeLuminance();
+  return (math.max(x, y) + 0.05) / (math.min(x, y) + 0.05);
+}
 
 /// Design tokens: spacing + radii. Use these instead of scattering magic
 /// numbers, so the whole app stays visually consistent and easy to retune.
@@ -164,7 +184,7 @@ class AppThemeColors extends ThemeExtension<AppThemeColors> {
     purple: Color(0xFF9B6DFF),
     textPrimary: Color(0xFFE9FFE9),
     textSecondary: Color(0xFF9DB39D),
-    textMuted: Color(0xFF6E7F6E),
+    textMuted: Color(0xFF7B8B7B),
     border: Color(0xFF2A2A2A),
     blueGradient: LinearGradient(
       begin: Alignment.topLeft,
@@ -199,7 +219,7 @@ class AppThemeColors extends ThemeExtension<AppThemeColors> {
     purple: Color(0xFF6D3FC4),
     textPrimary: Color(0xFF10190F),
     textSecondary: Color(0xFF44554A),
-    textMuted: Color(0xFF67786B),
+    textMuted: Color(0xFF607064),
     border: Color(0xFFD3E2D5),
     blueGradient: LinearGradient(
       begin: Alignment.topLeft,
@@ -235,7 +255,7 @@ class AppThemeColors extends ThemeExtension<AppThemeColors> {
     purple: Color(0xFF7C6BFF),
     textPrimary: Color(0xFFE1E7F5),
     textSecondary: Color(0xFF9FB0CC),
-    textMuted: Color(0xFF7A8AA6),
+    textMuted: Color(0xFF8190AA),
     border: Color(0xFF22304D),
     blueGradient: LinearGradient(
       begin: Alignment.topLeft,
@@ -270,7 +290,7 @@ class AppThemeColors extends ThemeExtension<AppThemeColors> {
     purple: Color(0xFF6D4BE0),
     textPrimary: Color(0xFF0B1524),
     textSecondary: Color(0xFF46586F),
-    textMuted: Color(0xFF64748B),
+    textMuted: Color(0xFF5D6C81),
     border: Color(0xFFD6E2F0),
     blueGradient: LinearGradient(
       begin: Alignment.topLeft,
@@ -377,7 +397,7 @@ class AppThemeColors extends ThemeExtension<AppThemeColors> {
     purple: Color(0xFFA371F7),
     textPrimary: Color(0xFFF0EDE8),
     textSecondary: Color(0xFF9C9691),
-    textMuted: Color(0xFF7A756F),
+    textMuted: Color(0xFF8B8782),
     border: Color(0xFF2A2A2A),
     blueGradient: LinearGradient(
       begin: Alignment.topLeft,

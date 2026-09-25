@@ -9,8 +9,8 @@ part 'blood_state.dart';
 
 class BloodBloc extends Bloc<BloodEvent, BloodState> {
   BloodBloc(BloodRepository repository)
-      : _repository = repository,
-        super(const BloodState(isLoading: true)) {
+    : _repository = repository,
+      super(const BloodState(isLoading: true)) {
     on<BloodStarted>(_onLoad);
     on<BloodTabChanged>(_onTabChanged);
     on<BloodRefreshRequested>(_onLoad);
@@ -23,12 +23,24 @@ class BloodBloc extends Bloc<BloodEvent, BloodState> {
   }
 
   Future<void> _onLoad(BloodEvent event, Emitter<BloodState> emit) async {
-    emit(state.copyWith(isLoading: true));
+    emit(state.copyWith(isLoading: true, clearError: true));
     try {
       final requests = await _repository.fetchRequests();
-      emit(state.copyWith(requests: requests, isLoading: false));
+      emit(
+        state.copyWith(
+          requests: requests,
+          isLoading: false,
+          clearError: true,
+          lastUpdatedAt: DateTime.now(),
+        ),
+      );
     } catch (_) {
-      emit(state.copyWith(isLoading: false));
+      emit(
+        state.copyWith(
+          isLoading: false,
+          error: 'Could not load blood requests.',
+        ),
+      );
     }
   }
 }

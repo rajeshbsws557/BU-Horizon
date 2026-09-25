@@ -2,6 +2,8 @@ import 'package:get_it/get_it.dart';
 import 'package:injectable/injectable.dart';
 
 import '../repositories/repositories.dart';
+import '../services/bus_schedule_controller.dart';
+import '../services/notification_controller.dart';
 import '../supabase/auth_service.dart';
 import '../supabase/reference_data_service.dart';
 import '../supabase/session_controller.dart';
@@ -37,6 +39,11 @@ void _registerSupabaseServices() {
     )
     // Not in the generated config: registered by hand like the services above.
     ..registerFactory<BusScheduleRepository>(StaticBusScheduleRepository.new);
+  if (!getIt.isRegistered<NotificationRepository>()) {
+    getIt.registerFactory<NotificationRepository>(
+      SampleNotificationRepository.new,
+    );
+  }
 
   if (SupabaseConfig.isConfigured) {
     getIt.allowReassignment = true;
@@ -53,6 +60,16 @@ void _registerSupabaseServices() {
       ..registerFactory<PeopleRepository>(SupabasePeopleRepository.new)
       ..registerFactory<ExamRepository>(SupabaseExamRepository.new)
       ..registerFactory<ResourceRepository>(SupabaseResourceRepository.new);
+    getIt.registerFactory<NotificationRepository>(
+      SupabaseNotificationRepository.new,
+    );
     getIt.allowReassignment = false;
   }
+  getIt
+    ..registerLazySingleton<BusScheduleController>(
+      () => BusScheduleController(getIt<BusScheduleRepository>()),
+    )
+    ..registerLazySingleton<NotificationController>(
+      () => NotificationController(getIt<NotificationRepository>()),
+    );
 }

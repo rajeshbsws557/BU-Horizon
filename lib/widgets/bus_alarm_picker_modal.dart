@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../data/university_bus_schedule_data.dart';
 import '../services/bus_alarm_service.dart';
 import '../theme/app_theme.dart';
 
@@ -13,6 +14,9 @@ class BusAlarmPickerModal extends StatefulWidget {
   final String departurePlace;
   final String tripTime;
   final String busName;
+
+  /// Days the trip runs, so the alarm lands on a date the bus actually leaves.
+  final ServiceDays serviceDays;
   final VoidCallback? onAlarmUpdated;
 
   const BusAlarmPickerModal({
@@ -22,6 +26,7 @@ class BusAlarmPickerModal extends StatefulWidget {
     required this.departurePlace,
     required this.tripTime,
     required this.busName,
+    this.serviceDays = ServiceDays.daily,
     this.onAlarmUpdated,
   });
 
@@ -100,8 +105,10 @@ class _BusAlarmPickerModalState extends State<BusAlarmPickerModal>
     if (_manualRingTimeOverride != null) {
       return _manualRingTimeOverride!;
     }
-    final depTime =
-        BusAlarmService.instance.parseTripTimeToDateTime(widget.tripTime);
+    final depTime = BusAlarmService.instance.parseTripTimeToDateTime(
+      widget.tripTime,
+      days: widget.serviceDays,
+    );
     return depTime.subtract(Duration(minutes: _selectedLeadMinutes));
   }
 
@@ -115,8 +122,10 @@ class _BusAlarmPickerModalState extends State<BusAlarmPickerModal>
 
     if (pickedTime != null) {
       final now = DateTime.now();
-      final depTime =
-          BusAlarmService.instance.parseTripTimeToDateTime(widget.tripTime);
+      final depTime = BusAlarmService.instance.parseTripTimeToDateTime(
+        widget.tripTime,
+        days: widget.serviceDays,
+      );
 
       var target = DateTime(
         now.year,
@@ -149,6 +158,7 @@ class _BusAlarmPickerModalState extends State<BusAlarmPickerModal>
         tripTime: widget.tripTime,
         busName: widget.busName,
         leadMinutes: _selectedLeadMinutes,
+        serviceDays: widget.serviceDays,
       );
 
       if (!mounted) return;

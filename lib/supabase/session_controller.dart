@@ -205,8 +205,9 @@ class SessionController extends ChangeNotifier {
               universityEmail: row['university_email'] as String?,
               batchId: row['batch_id'] as String?,
 
-              // The student's own registration choices are the source of truth;
-              // fall back to the program/batch for profiles predating them.
+              // The student's own current_term is the display value;
+              // advance_batch() updates it alongside batches.current_term.
+              // Fall back to the batch for profiles that predate the column.
               currentTerm:
                   (row['current_term'] as int?) ?? batch?['current_term'] as int?,
               batchStatus: batch?['status'] as String?,

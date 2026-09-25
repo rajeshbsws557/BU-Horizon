@@ -29,6 +29,35 @@ int? parseClockMinutes(String raw) {
   return hour * 60 + minute;
 }
 
+/// The next instant at which [minutesOfDay] occurs on a day [days] runs.
+///
+/// This generalises the old "today, else tomorrow" rollover. A block that only
+/// runs Fri & Sat can be up to six days out, so the search walks forward a full
+/// week and returns null only if nothing matches (which [ServiceDays.daily] and
+/// the two real patterns never do).
+///
+/// A candidate stays valid for [grace] past its scheduled minute, so a bus that
+/// just pulled away is still reported as the current departure rather than
+/// jumping a whole week ahead.
+DateTime? nextServiceOccurrence(
+  ServiceDays days, {
+  required int minutesOfDay,
+  required DateTime now,
+  Duration grace = const Duration(minutes: 1),
+}) {
+  for (var offset = 0; offset <= 7; offset++) {
+    final candidate = DateTime(
+      now.year,
+      now.month,
+      now.day + offset,
+    ).add(Duration(minutes: minutesOfDay));
+    if (!days.runsOn(candidate)) continue;
+    if (candidate.add(grace).isBefore(now)) continue;
+    return candidate;
+  }
+  return null;
+}
+
 /// A concrete, dated occurrence of a timetable trip.
 class NextDeparture {
   /// Index of the owning [DepartureSection] in the list handed to the
@@ -38,27 +67,36 @@ class NextDeparture {
   final String departurePlace;
   final BusTripItem trip;
 
-  /// The wall-clock instant this bus leaves (today, or tomorrow after the last
-  /// bus of the day has gone).
+  /// Which days the owning section runs, so callers can build the day-scoped
+  /// trip id and schedule an alarm on the right date.
+  final ServiceDays serviceDays;
+
+  /// The wall-clock instant this bus leaves.
   final DateTime departsAt;
 
-  /// True when [departsAt] rolled over to the next calendar day.
-  final bool isTomorrow;
+  /// Calendar days from "today" to [departsAt]: 0 today, 1 tomorrow, and up to
+  /// 6 for a block that only runs on days that have already passed this week.
+  final int daysAhead;
 
   const NextDeparture({
     required this.sectionIndex,
     required this.departurePlace,
     required this.trip,
     required this.departsAt,
-    required this.isTomorrow,
+    required this.daysAhead,
+    this.serviceDays = ServiceDays.daily,
   });
+
+  /// True when [departsAt] is the next calendar day. Kept so existing callers
+  /// that only distinguish today from tomorrow still read naturally.
+  bool get isTomorrow => daysAhead == 1;
 
   /// Signed time remaining. Negative once the bus has pulled away.
   Duration timeUntil(DateTime now) => departsAt.difference(now);
 }
 
-/// Every remaining trip of the service day (plus tomorrow's wrap-around),
-/// ordered by the instant each bus actually leaves.
+/// Every remaining trip of the service day (plus the wrap-around to each
+/// block's next running day), ordered by the instant each bus actually leaves.
 ///
 /// A trip stays "upcoming" for [grace] after its scheduled minute so the card
 /// can show a "Departing now" beat instead of skipping ahead the instant the
@@ -77,24 +115,28 @@ List<NextDeparture> resolveUpcomingDepartures(
       final minutes = parseClockMinutes(trip.time);
       if (minutes == null) continue; // Unparseable label: never becomes "next".
 
-      var departsAt = today.add(Duration(minutes: minutes));
-      var isTomorrow = false;
-
-      // Already gone (beyond the grace beat)? Its next occurrence is tomorrow,
-      // which is what keeps the card useful late at night.
-      if (departsAt.add(grace).isBefore(now)) {
-        departsAt = DateTime(now.year, now.month, now.day + 1)
-            .add(Duration(minutes: minutes));
-        isTomorrow = true;
-      }
+      // Day-aware: a Fri/Sat-only 9:00 AM trip must not be offered on a
+      // Tuesday, which is exactly what the unconditional rollover used to do.
+      final departsAt = nextServiceOccurrence(
+        section.serviceDays,
+        minutesOfDay: minutes,
+        now: now,
+        grace: grace,
+      );
+      if (departsAt == null) continue;
 
       departures.add(
         NextDeparture(
           sectionIndex: s,
           departurePlace: section.departurePlace,
           trip: trip,
+          serviceDays: section.serviceDays,
           departsAt: departsAt,
-          isTomorrow: isTomorrow,
+          daysAhead: DateTime(
+            departsAt.year,
+            departsAt.month,
+            departsAt.day,
+          ).difference(today).inDays,
         ),
       );
     }
@@ -132,4 +174,26 @@ String formatCountdown(Duration remaining) {
     return '${minutes}m ${seconds.toString().padLeft(2, '0')}s';
   }
   return '${seconds}s';
+}
+
+const Map<int, String> _weekdayNames = {
+  DateTime.monday: 'Monday',
+  DateTime.tuesday: 'Tuesday',
+  DateTime.wednesday: 'Wednesday',
+  DateTime.thursday: 'Thursday',
+  DateTime.friday: 'Friday',
+  DateTime.saturday: 'Saturday',
+  DateTime.sunday: 'Sunday',
+};
+
+/// Day qualifier for a departure that is not today.
+///
+/// Empty for later today and 'Tomorrow' for the next day, as before. A block
+/// that only runs on some days can now be several days out — a Fri & Sat
+/// service viewed on a Tuesday — where "Tomorrow" would be a lie, so those
+/// name the weekday instead.
+String formatDepartureDay(int daysAhead, DateTime departsAt) {
+  if (daysAhead <= 0) return '';
+  if (daysAhead == 1) return 'Tomorrow';
+  return _weekdayNames[departsAt.weekday] ?? '';
 }

@@ -42,57 +42,63 @@ class SegmentedTabs extends StatelessWidget {
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: context.colors.border)),
       ),
-      child: LayoutBuilder(builder: (context, c) {
-        final tabWidth = c.maxWidth / tabs.length;
-        return Stack(
-          children: [
-            Row(
-              children: List.generate(tabs.length, (i) {
-                final active = i == selected;
-                return Expanded(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () {
-                      HapticFeedback.selectionClick();
-                      onChanged(i);
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      child: AnimatedDefaultTextStyle(
-                        duration: const Duration(milliseconds: 200),
-                        style: TextStyle(
-                          color: active ? context.colors.primary : context.colors.textSecondary,
-                          fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-                          fontSize: 14,
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final tabWidth = c.maxWidth / tabs.length;
+          return Stack(
+            children: [
+              Row(
+                children: List.generate(tabs.length, (i) {
+                  final active = i == selected;
+                  return Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        onChanged(i);
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        child: AnimatedDefaultTextStyle(
+                          duration: const Duration(milliseconds: 200),
+                          style: TextStyle(
+                            color: active
+                                ? context.colors.primary
+                                : context.colors.textSecondary,
+                            fontWeight: active
+                                ? FontWeight.w600
+                                : FontWeight.w500,
+                            fontSize: 14,
+                          ),
+                          child: Text(tabs[i], textAlign: TextAlign.center),
                         ),
-                        child: Text(tabs[i], textAlign: TextAlign.center),
                       ),
                     ),
-                  ),
-                );
-              }),
-            ),
-            AnimatedPositionedDirectional(
-              duration: const Duration(milliseconds: 260),
-              curve: Curves.easeOutCubic,
-              start: selected * tabWidth,
-              bottom: 0,
-              child: Container(
-                width: tabWidth,
-                alignment: Alignment.center,
+                  );
+                }),
+              ),
+              AnimatedPositionedDirectional(
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeOutCubic,
+                start: selected * tabWidth,
+                bottom: 0,
                 child: Container(
-                  width: tabWidth * 0.5,
-                  height: 2.5,
-                  decoration: BoxDecoration(
-                    color: context.colors.primary,
-                    borderRadius: BorderRadius.circular(2),
+                  width: tabWidth,
+                  alignment: Alignment.center,
+                  child: Container(
+                    width: tabWidth * 0.5,
+                    height: 2.5,
+                    decoration: BoxDecoration(
+                      color: context.colors.primary,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
-        );
-      }),
+            ],
+          );
+        },
+      ),
     );
   }
 }
@@ -102,7 +108,12 @@ class SearchField extends StatelessWidget {
   final String hint;
   final ValueChanged<String>? onChanged;
   final TextEditingController? controller;
-  const SearchField({super.key, required this.hint, this.onChanged, this.controller});
+  const SearchField({
+    super.key,
+    required this.hint,
+    this.onChanged,
+    this.controller,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -119,9 +130,16 @@ class SearchField extends StatelessWidget {
         decoration: InputDecoration(
           hintText: hint,
           hintStyle: TextStyle(color: context.colors.textMuted, fontSize: 14),
-          prefixIcon: Icon(Icons.search, color: context.colors.textMuted, size: 20),
+          prefixIcon: Icon(
+            Icons.search,
+            color: context.colors.textMuted,
+            size: 20,
+          ),
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
+          contentPadding: const EdgeInsets.symmetric(
+            vertical: 14,
+            horizontal: 6,
+          ),
         ),
       ),
     );
@@ -188,7 +206,12 @@ class TabHeader extends StatelessWidget {
   final String title;
   final List<Widget> actions;
   final String? subtitle;
-  const TabHeader({super.key, required this.title, this.actions = const [], this.subtitle});
+  const TabHeader({
+    super.key,
+    required this.title,
+    this.actions = const [],
+    this.subtitle,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -334,6 +357,172 @@ class EmptyState extends StatelessWidget {
   }
 }
 
+enum DataStateTone { info, warning, error }
+
+/// Compact, reusable state banner for stale, offline, and failed data reads.
+class DataStateBanner extends StatelessWidget {
+  final String message;
+  final DataStateTone tone;
+  final VoidCallback? onRetry;
+  final String retryLabel;
+
+  const DataStateBanner({
+    super.key,
+    required this.message,
+    this.tone = DataStateTone.info,
+    this.onRetry,
+    this.retryLabel = 'Retry',
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (tone) {
+      DataStateTone.info => context.colors.primary,
+      DataStateTone.warning => context.colors.warning,
+      DataStateTone.error => context.colors.danger,
+    };
+    final icon = switch (tone) {
+      DataStateTone.info => Icons.info_outline_rounded,
+      DataStateTone.warning => Icons.cloud_off_outlined,
+      DataStateTone.error => Icons.error_outline_rounded,
+    };
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withValues(alpha: 0.32)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(
+                  color: context.colors.textSecondary,
+                  fontSize: 12,
+                  height: 1.35,
+                ),
+              ),
+            ),
+            if (onRetry != null) ...[
+              const SizedBox(width: 6),
+              TextButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh_rounded, size: 17),
+                label: Text(retryLabel),
+                style: TextButton.styleFrom(
+                  foregroundColor: color,
+                  minimumSize: const Size(44, 44),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Full-list failure state that remains pull-to-refresh capable.
+class RetryStateList extends StatelessWidget {
+  final String title;
+  final String message;
+  final Future<void> Function() onRetry;
+  final IconData icon;
+
+  const RetryStateList({
+    super.key,
+    required this.title,
+    required this.message,
+    required this.onRetry,
+    this.icon = Icons.cloud_off_rounded,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      children: [
+        const SizedBox(height: 72),
+        EmptyState(icon: icon, title: title, message: message),
+        Center(
+          child: TextButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('Try again'),
+            style: TextButton.styleFrom(minimumSize: const Size(44, 44)),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class LastUpdatedLabel extends StatelessWidget {
+  final DateTime? updatedAt;
+  final String emptyLabel;
+  final MainAxisAlignment alignment;
+
+  const LastUpdatedLabel({
+    super.key,
+    required this.updatedAt,
+    this.emptyLabel = 'Not updated yet',
+    this.alignment = MainAxisAlignment.end,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final label = updatedAt == null
+        ? emptyLabel
+        : 'Last updated ${formatFreshnessTime(updatedAt!)}';
+    return Semantics(
+      label: label,
+      child: Row(
+        mainAxisAlignment: alignment,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.sync_rounded, size: 13, color: context.colors.textMuted),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              label,
+              style: TextStyle(color: context.colors.textMuted, fontSize: 10.5),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String formatFreshnessTime(DateTime value, {DateTime? now}) {
+  final local = value.toLocal();
+  final current = now?.toLocal() ?? DateTime.now();
+  final difference = current.difference(local);
+  if (!difference.isNegative && difference.inMinutes < 1) return 'just now';
+  if (!difference.isNegative && difference.inMinutes < 60) {
+    return '${difference.inMinutes}m ago';
+  }
+  final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
+  final minute = local.minute.toString().padLeft(2, '0');
+  final clock = '$hour:$minute ${local.hour < 12 ? 'AM' : 'PM'}';
+  final sameDay =
+      local.year == current.year &&
+      local.month == current.month &&
+      local.day == current.day;
+  if (sameDay) return clock;
+  return '${local.day}/${local.month}/${local.year} at $clock';
+}
+
 /// A shimmering skeleton block for loading states.
 class Skeleton extends StatefulWidget {
   final double height;
@@ -345,7 +534,8 @@ class Skeleton extends StatefulWidget {
   State<Skeleton> createState() => _SkeletonState();
 }
 
-class _SkeletonState extends State<Skeleton> with SingleTickerProviderStateMixin {
+class _SkeletonState extends State<Skeleton>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1200),
@@ -388,13 +578,15 @@ void showToast(BuildContext context, String message) {
   HapticFeedback.lightImpact();
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(
-      content: Text(
-        message,
-        style: TextStyle(color: context.colors.textPrimary),
+    ..showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: TextStyle(color: context.colors.textPrimary),
+        ),
+        backgroundColor: context.colors.surfaceAlt,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
-      backgroundColor: context.colors.surfaceAlt,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    ));
+    );
 }
