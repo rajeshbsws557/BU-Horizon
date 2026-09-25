@@ -78,8 +78,7 @@ class _AccountApprovalsScreenState extends State<AccountApprovalsScreen> {
       var query = _client
           .from('profiles')
           .select('id, full_name, student_id, roll, email, created_at')
-          .eq('status', 'pending_verification')
-          .eq('is_provisional', true);
+          .eq('status', 'pending_verification');
       if (!isAdmin && profile?.batchId != null) {
         query = query.eq('batch_id', profile!.batchId!);
       }
@@ -210,7 +209,7 @@ class _AccountApprovalsScreenState extends State<AccountApprovalsScreen> {
             icon: Icons.verified_user_outlined,
             title: 'No Pending Accounts',
             message:
-                'When a batchmate registers without a university email, their '
+                'When a new student registers for your batch, their '
                 'request will appear here for you to approve.',
           ),
         ],
@@ -224,9 +223,8 @@ class _AccountApprovalsScreenState extends State<AccountApprovalsScreen> {
           return Padding(
             padding: const EdgeInsets.only(bottom: 12, left: 4, right: 4),
             child: Text(
-              'Review new students in your batch who registered with a personal '
-              'email. Approving activates their account; they can add their '
-              '@bu.ac.bd email later to become fully verified.',
+              'Review new students who registered for your batch. '
+              'Approving activates their account and unlocks batch content.',
               style: TextStyle(
                 fontSize: 13,
                 height: 1.45,

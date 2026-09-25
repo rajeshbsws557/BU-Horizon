@@ -1,21 +1,18 @@
 /// Supabase connection configuration.
 ///
-/// The live project's URL and publishable key are baked in as defaults, so
-/// every build (plain `flutter run`, IDE launch, release APK) connects to the
-/// real backend without needing --dart-define flags. Before this, launching
-/// without `--dart-define-from-file=dart_defines.json` silently fell back to
-/// the demo Sample* repositories and skipped auth gating entirely.
+/// Credentials are injected at build time via `--dart-define-from-file` or
+/// individual `--dart-define` flags — no secrets are stored in source control.
 ///
-/// The values can still be overridden (e.g. to point at a staging project):
+///   flutter run --dart-define-from-file=dart_defines.json
+///
+/// Or pass values individually:
 ///
 ///   flutter run \
 ///     --dart-define=SUPABASE_URL=https://<ref>.supabase.co \
 ///     --dart-define=SUPABASE_ANON_KEY=<publishable-key>
 ///
-/// Passing explicitly EMPTY values restores the UI-only mode with sample data
-/// and no auth (used by the "UI only" launch configuration):
-///
-///   flutter run --dart-define=SUPABASE_URL= --dart-define=SUPABASE_ANON_KEY=
+/// When both values are left empty (the default), the app runs in UI-only
+/// mode with sample data and no auth — useful for design work and widget tests.
 ///
 /// The publishable (formerly "anon") key is safe to ship in a client;
 /// row-level security is what protects the data. Never put the service_role
@@ -25,11 +22,9 @@ abstract class SupabaseConfig {
 
   static const String url = String.fromEnvironment(
     'SUPABASE_URL',
-    defaultValue: 'https://mhigxrthygovzwucxxjh.supabase.co',
   );
   static const String anonKey = String.fromEnvironment(
     'SUPABASE_ANON_KEY',
-    defaultValue: 'sb_publishable_KUNeGKK0Rlta-lEdUyiJjQ_sy2lu9pc',
   );
 
   /// Whether credentials are present at all. Only false when both values are

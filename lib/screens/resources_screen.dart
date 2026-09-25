@@ -153,7 +153,7 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
         return Scaffold(
           appBar: AppBar(
             title: Text(
-              'Resources',
+              'Class Archive',
               style: TextStyle(color: context.colors.textPrimary),
             ),
             backgroundColor: Colors.transparent,
@@ -169,22 +169,436 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
           ),
           body: isPending
               ? const PendingApprovalView(featureName: 'resources')
-              : CourseCatalogView(
-
-            isLoading: _loading,
-            canManage: canManage,
-            courses: _courses,
-            featureName: 'resources',
-            emptyIcon: Icons.folder_open_outlined,
-            onRefresh: _loadCourses,
-            onOpen: _openCourse,
-            onEdit: canManage ? _editCourse : null,
-            onDelete: canManage ? _deleteCourse : null,
-            errorMessage: _error,
-            lastUpdatedAt: _lastUpdatedAt,
-          ),
+              : _ArchiveTableBody(
+                  isLoading: _loading,
+                  courses: _courses,
+                  canManage: canManage,
+                  error: _error,
+                  lastUpdatedAt: _lastUpdatedAt,
+                  onRefresh: _loadCourses,
+                  onOpen: _openCourse,
+                  onEdit: canManage ? _editCourse : null,
+                  onDelete: canManage ? _deleteCourse : null,
+                ),
         );
       },
+    );
+  }
+}
+
+/// Archive-style table body showing courses in a row-and-column layout.
+///
+/// Each row represents a course offering and shows: a generated date label,
+/// the course name (code + title), the teacher's name, and topics derived from
+/// the course title / description.
+class _ArchiveTableBody extends StatelessWidget {
+  final bool isLoading;
+  final List<CourseOffering> courses;
+  final bool canManage;
+  final String? error;
+  final DateTime? lastUpdatedAt;
+  final Future<void> Function() onRefresh;
+  final ValueChanged<CourseOffering> onOpen;
+  final ValueChanged<CourseOffering>? onEdit;
+  final ValueChanged<CourseOffering>? onDelete;
+
+  const _ArchiveTableBody({
+    required this.isLoading,
+    required this.courses,
+    required this.canManage,
+    required this.error,
+    required this.lastUpdatedAt,
+    required this.onRefresh,
+    required this.onOpen,
+    this.onEdit,
+    this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (isLoading) {
+      return const _ArchiveSkeletonTable();
+    }
+
+    if (error != null && courses.isEmpty) {
+      return RetryStateList(
+        title: 'Archive unavailable',
+        message: error!,
+        onRetry: onRefresh,
+      );
+    }
+
+    if (courses.isEmpty) {
+      return RefreshIndicator(
+        color: context.colors.primary,
+        backgroundColor: context.colors.surfaceAlt,
+        onRefresh: onRefresh,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            SizedBox(
+              height: MediaQuery.sizeOf(context).height * 0.55,
+              child: const EmptyState(
+                icon: Icons.folder_open_outlined,
+                title: 'No classes archived yet',
+                message: 'Course records will appear here once your CR adds them.',
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Group courses by term for visual separation.
+    final grouped = <int, List<CourseOffering>>{};
+    for (final c in courses) {
+      (grouped[c.termNumber ?? 0] ??= []).add(c);
+    }
+    final sortedTerms = grouped.keys.toList()..sort();
+
+    return RefreshIndicator(
+      color: context.colors.primary,
+      backgroundColor: context.colors.surfaceAlt,
+      onRefresh: onRefresh,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.sm,
+          AppSpacing.md,
+          80,
+        ),
+        children: [
+          // Error banner + freshness stamp
+          if (error != null) ...[
+            DataStateBanner(
+              message: 'Could not refresh archive. Showing the last loaded data.',
+              tone: DataStateTone.warning,
+              onRetry: onRefresh,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+          ],
+          Align(
+            alignment: Alignment.centerRight,
+            child: LastUpdatedLabel(
+              updatedAt: lastUpdatedAt,
+              emptyLabel: 'Archive not synced yet',
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+
+          // One table card per term
+          for (final term in sortedTerms) ...[
+            Entrance(
+              index: sortedTerms.indexOf(term),
+              child: _TermArchiveCard(
+                term: term,
+                courses: grouped[term]!,
+                canManage: canManage,
+                onOpen: onOpen,
+                onEdit: onEdit,
+                onDelete: onDelete,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// A single term's archive displayed as a styled card with a DataTable inside.
+class _TermArchiveCard extends StatelessWidget {
+  final int term;
+  final List<CourseOffering> courses;
+  final bool canManage;
+  final ValueChanged<CourseOffering> onOpen;
+  final ValueChanged<CourseOffering>? onEdit;
+  final ValueChanged<CourseOffering>? onDelete;
+
+  const _TermArchiveCard({
+    required this.term,
+    required this.courses,
+    required this.canManage,
+    required this.onOpen,
+    this.onEdit,
+    this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final termLabel = term == 0 ? 'General' : 'Term $term';
+
+    return Container(
+      decoration: BoxDecoration(
+        color: context.colors.surfaceAlt,
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(color: context.colors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Term header
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: AppSpacing.md,
+            ),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  context.colors.primary.withValues(alpha: 0.12),
+                  context.colors.accentCyan.withValues(alpha: 0.06),
+                ],
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: context.colors.primary.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(AppRadii.md),
+                  ),
+                  child: Icon(
+                    Icons.school_rounded,
+                    color: context.colors.primary,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Text(
+                  termLabel,
+                  style: TextStyle(
+                    color: context.colors.textPrimary,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: context.colors.primary.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${courses.length} course${courses.length == 1 ? '' : 's'}',
+                    style: TextStyle(
+                      color: context.colors.primary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Horizontally scrollable table
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minWidth: MediaQuery.sizeOf(context).width - 2 * AppSpacing.md,
+              ),
+              child: DataTable(
+                headingRowColor: WidgetStateProperty.all(
+                  context.colors.primary.withValues(alpha: 0.05),
+                ),
+                headingTextStyle: TextStyle(
+                  color: context.colors.textSecondary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                ),
+                dataTextStyle: TextStyle(
+                  color: context.colors.textPrimary,
+                  fontSize: 13,
+                ),
+                columnSpacing: 20,
+                horizontalMargin: AppSpacing.lg,
+                columns: const [
+                  DataColumn(label: Text('Course')),
+                  DataColumn(label: Text('Teacher')),
+                  DataColumn(label: Text('Credits')),
+                  if (true) DataColumn(label: Text('Topics')),
+                ],
+                rows: courses.map((c) {
+                  return DataRow(
+                    onSelectChanged: (_) => onOpen(c),
+                    cells: [
+                      DataCell(
+                        SizedBox(
+                          width: 160,
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                c.code,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: context.colors.primary,
+                                  fontSize: 12.5,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                c.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: context.colors.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      DataCell(
+                        SizedBox(
+                          width: 120,
+                          child: Text(
+                            c.teacherName.isNotEmpty ? c.teacherName : '—',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                      DataCell(
+                        Text(
+                          c.creditHours != null
+                              ? c.creditHours!.toStringAsFixed(
+                                  c.creditHours! == c.creditHours!.roundToDouble()
+                                      ? 0
+                                      : 1,
+                                )
+                              : '—',
+                        ),
+                      ),
+                      DataCell(
+                        SizedBox(
+                          width: 180,
+                          child: Text(
+                            c.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: context.colors.textSecondary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+
+          // CR management row
+          if (canManage && (onEdit != null || onDelete != null))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                0,
+                AppSpacing.lg,
+                AppSpacing.md,
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Text(
+                    'Tap a row to view resources',
+                    style: TextStyle(
+                      color: context.colors.textMuted,
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                0,
+                AppSpacing.lg,
+                AppSpacing.md,
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Icon(
+                    Icons.touch_app_rounded,
+                    size: 13,
+                    color: context.colors.textMuted,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Tap a row to view resources',
+                    style: TextStyle(
+                      color: context.colors.textMuted,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Skeleton placeholder matching the archive table shape while loading.
+class _ArchiveSkeletonTable extends StatelessWidget {
+  const _ArchiveSkeletonTable();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      children: [
+        for (int t = 0; t < 2; t++) ...[
+          Container(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            decoration: cardDecoration(context: context),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Skeleton(height: 16, width: 100),
+                const SizedBox(height: AppSpacing.lg),
+                for (int r = 0; r < 3; r++) ...[
+                  const Row(
+                    children: [
+                      Skeleton(height: 14, width: 100),
+                      SizedBox(width: AppSpacing.lg),
+                      Skeleton(height: 14, width: 120),
+                      SizedBox(width: AppSpacing.lg),
+                      Skeleton(height: 14, width: 40),
+                      SizedBox(width: AppSpacing.lg),
+                      Expanded(child: Skeleton(height: 14, width: 140)),
+                    ],
+                  ),
+                  if (r < 2) const SizedBox(height: AppSpacing.md),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+        ],
+      ],
     );
   }
 }

@@ -104,12 +104,13 @@ class HomeScreen extends StatelessWidget {
                       const _HomeSyncState(),
 
                       const SizedBox(height: 16),
-                      Entrance(
-                        index: 1,
-                        child: _LegalHelpCard(
-                          onTap: () => context.push(AppRoutes.legalHelp),
-                        ),
-                      ),
+                      // TODO: re-enable Legal Help card once the feature goes public.
+                      // Entrance(
+                      //   index: 1,
+                      //   child: _LegalHelpCard(
+                      //     onTap: () => context.push(AppRoutes.legalHelp),
+                      //   ),
+                      // ),
                       const _UrgentBloodCard(),
                       const SizedBox(height: 22),
                       // The live countdown is what a student opens this app for

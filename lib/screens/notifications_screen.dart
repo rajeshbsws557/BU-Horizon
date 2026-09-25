@@ -67,8 +67,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         var query = _client
             .from('profiles')
             .select('id')
-            .eq('status', 'pending_verification')
-            .eq('is_provisional', true);
+            .eq('status', 'pending_verification');
         // CRs only see their own batch (RLS enforces this too).
         if (!isAdmin && profile?.batchId != null) {
           query = query.eq('batch_id', profile!.batchId!);

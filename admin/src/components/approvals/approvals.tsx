@@ -46,7 +46,6 @@ async function fetchApprovals(): Promise<ApprovalsData> {
         "id, full_name, email, personal_email, student_id, roll, batch_id, department_id, created_at",
       )
       .eq("status", "pending_verification")
-      .eq("is_provisional", true)
       .order("created_at", { ascending: true }),
     client.from("batches").select("id, name, session"),
     client.from("departments").select("id, name, code").order("name"),
@@ -136,13 +135,12 @@ export function Approvals() {
           Accounts · identity verification
         </span>
         <h1 style={{ fontSize: 24, fontWeight: 700, margin: "4px 0" }}>
-          Provisional account approvals
+          Student account approvals
         </h1>
         <p style={{ fontSize: 14, opacity: 0.8, maxWidth: 720 }}>
-          New students who registered without a university email land here for
-          identity review. Approving activates the account; the student can add
-          their <code>@bu.ac.bd</code> email later to become fully verified.
-          Batch CRs can also approve their own batchmates from the mobile app.
+          All new students land here for identity review before their batch
+          content is unlocked. Approving activates the account. Batch CRs can
+          also approve their own batchmates from the mobile app.
         </p>
       </header>
 
@@ -194,7 +192,7 @@ export function Approvals() {
                 <th style={{ padding: "10px 18px" }}>Student</th>
                 <th style={{ padding: "10px 18px" }}>Department</th>
                 <th style={{ padding: "10px 18px" }}>Batch</th>
-                <th style={{ padding: "10px 18px" }}>Personal email</th>
+                <th style={{ padding: "10px 18px" }}>Email</th>
                 <th style={{ padding: "10px 18px" }} aria-label="Actions" />
               </tr>
             </thead>

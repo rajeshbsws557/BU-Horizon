@@ -61,7 +61,7 @@ class MainScaffold extends StatelessWidget {
             'lost' => (AppRoutes.lostFound, null),
             'attendance' => (AppRoutes.attendance, 'Attendance'),
             'exams' => (AppRoutes.exams, 'Exam Schedule'),
-            'resources' => (AppRoutes.resources, 'Resources'),
+            'resources' => (AppRoutes.resources, 'Class Archive'),
             _ => (AppRoutes.about, null),
           };
           if (gateLabel != null && !requireSignIn(context, gateLabel)) return;
@@ -301,7 +301,7 @@ class _HubSheet extends StatelessWidget {
       ['bus', Icons.directions_bus_rounded, 'Bus Schedule', context.colors.primary],
       ['notices', Icons.campaign_rounded, 'Class Notices', context.colors.accentCyan],
       ['exams', Icons.edit_calendar_rounded, 'Exam Schedule', context.colors.danger],
-      ['resources', Icons.folder_rounded, 'Resources', context.colors.primary],
+      ['resources', Icons.folder_rounded, 'Class Archive', context.colors.primary],
       ['attendance', Icons.check_circle_rounded, 'Attendance', context.colors.success],
       ['blood', Icons.water_drop_rounded, 'Blood Help', context.colors.danger],
       ['lost', Icons.inventory_2_rounded, 'Lost & Found', context.colors.warning],

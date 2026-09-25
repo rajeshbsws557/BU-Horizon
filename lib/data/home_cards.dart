@@ -88,22 +88,23 @@ abstract class HomeCardCatalog {
     ),
     HomeCard(
       id: 'resources',
-      title: 'Resources',
-      subtitle: 'Notes, files & links',
+      title: 'Class Archive',
+      subtitle: 'Past classes & materials',
       icon: Icons.folder_rounded,
       color: AppColorToken.primary,
       route: AppRoutes.resources,
       membersOnly: true,
     ),
-    HomeCard(
-      id: 'people',
-      title: 'People Search',
-      subtitle: 'Find anyone in campus',
-      icon: Icons.group_rounded,
-      color: AppColorToken.purple,
-      route: AppRoutes.search,
-      membersOnly: true,
-    ),
+    // TODO(bug-fix): re-enable People Search once the bug is fixed.
+    // HomeCard(
+    //   id: 'people',
+    //   title: 'People Search',
+    //   subtitle: 'Find anyone in campus',
+    //   icon: Icons.group_rounded,
+    //   color: AppColorToken.purple,
+    //   route: AppRoutes.search,
+    //   membersOnly: true,
+    // ),
     HomeCard(
       id: 'blood',
       title: 'Blood Help',
@@ -128,14 +129,15 @@ abstract class HomeCardCatalog {
       color: AppColorToken.purple,
       route: AppRoutes.club,
     ),
-    HomeCard(
-      id: 'legal-help',
-      title: 'Legal Help',
-      subtitle: 'Report harassment safely',
-      icon: Icons.shield_rounded,
-      color: AppColorToken.danger,
-      route: AppRoutes.legalHelp,
-    ),
+    // TODO: re-enable Legal Help once the feature goes public.
+    // HomeCard(
+    //   id: 'legal-help',
+    //   title: 'Legal Help',
+    //   subtitle: 'Report harassment safely',
+    //   icon: Icons.shield_rounded,
+    //   color: AppColorToken.danger,
+    //   route: AppRoutes.legalHelp,
+    // ),
     HomeCard(
       id: 'alerts',
       title: 'Alerts',
